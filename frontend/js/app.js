@@ -46,6 +46,52 @@ const state = {
 };
 
 // ---------- Utilities ----------
+// ---------- API Configuration ----------
+const API_URL = 'http://localhost:5000/api';
+
+// API Functions
+async function apiCall(endpoint, options = {}) {
+  try {
+    const response = await fetch(`${API_URL}${endpoint}`, {
+      headers: { 'Content-Type': 'application/json', ...options.headers },
+      ...options
+    });
+    if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
+    return await response.json();
+  } catch (err) {
+    console.error('API Error:', err);
+    pushToast('Error', err.message);
+    return null;
+  }
+}
+
+async function loadServicesFromDB() {
+  const result = await apiCall('/services');
+  if (result && result.success && result.data) {
+    // Map backend services to frontend format
+    state.services = result.data.map(s => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      expectedDurationMin: s.expectedDurationMin,
+      priority: s.priority,
+      isOpen: s.status === 'open'
+    }));
+  }
+}
+
+async function loadQueuesFromDB() {
+  const result = await apiCall('/queues');
+  if (result && result.success && result.data) {
+    state.queues = result.data;
+  }
+}
+
+async function createQueueInDB(queueData) {
+  return await apiCall('/queues', { method: 'POST', body: JSON.stringify(queueData) });
+}
+
+// ---------- Utilities ----------
 function qs(sel, root = document){ return root.querySelector(sel); }
 function qsa(sel, root = document){ return [...root.querySelectorAll(sel)]; }
 function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -184,7 +230,7 @@ function bindLogin(){
   const password = qs('#password');
   const role = qs('#role');
 
-  qs('#loginBtn').addEventListener('click', () => {
+  qs('#loginBtn').addEventListener('click', async () => {
     const e = email.value.trim();
     const p = password.value;
 
@@ -201,11 +247,23 @@ function bindLogin(){
     }
 
     err.style.display = 'none';
-    state.role = role.value;
-    state.email = e;
-    saveSession();
-    pushToast('Welcome', `Signed in as ${state.role}. (Mock auth)`);
-    location.hash = state.role === 'admin' ? '#/admin/dashboard' : '#/app/dashboard';
+    
+    // Send login to backend
+    const result = await apiCall('/users/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: e, password: p })
+    });
+
+    if (result && result.success) {
+      state.role = result.data.role;
+      state.email = result.data.email;
+      saveSession();
+      pushToast('Welcome', `Signed in as ${state.role}`);
+      location.hash = state.role === 'admin' ? '#/admin/dashboard' : '#/app/dashboard';
+    } else {
+      err.style.display = 'block';
+      err.textContent = 'Invalid email or password';
+    }
   });
 }
 
@@ -248,7 +306,7 @@ function bindRegister(){
   const password = qs('#password');
   const confirm = qs('#confirm');
 
-  qs('#registerBtn').addEventListener('click', () => {
+  qs('#registerBtn').addEventListener('click', async () => {
     const n = name.value.trim();
     const e = email.value.trim();
     const p = password.value;
@@ -269,8 +327,20 @@ function bindRegister(){
       return;
     }
     err.style.display = 'none';
-    pushToast('Account created', 'Registration complete (mock). Please login.');
-    location.hash = '#/login';
+    
+    // Send registration to backend
+    const result = await apiCall('/users/register', {
+      method: 'POST',
+      body: JSON.stringify({ email: e, password: p, role: 'user' })
+    });
+
+    if (result && result.success) {
+      pushToast('Account created', 'Registration complete. Please login.');
+      location.hash = '#/login';
+    } else {
+      err.style.display = 'block';
+      err.textContent = result?.error || 'Registration failed';
+    }
   });
 }
 
@@ -401,18 +471,30 @@ function bindJoinQueue(){
 
   sel.addEventListener('change', updateView);
 
-  joinBtn.addEventListener('click', () => {
+  joinBtn.addEventListener('click', async () => {
     const id = sel.value;
     const s = state.services.find(x => x.id === id);
     if (!s || !s.isOpen) return;
 
     const qLen = state.queues.filter(q => q.serviceId === id).length;
-    state.joined.serviceId = id;
-    state.joined.position = qLen + 1;
-    state.joined.status = 'waiting';
+    
+    // Save to database with correct data
+    const result = await createQueueInDB({
+      email: state.email,
+      serviceId: id,
+      position: qLen + 1,
+      status: 'waiting'
+    });
 
-    pushToast('Joined queue', `You joined "${s.name}" (mock).`);
-    location.hash = '#/app/status';
+    if (result && result.success) {
+      state.joined.serviceId = id;
+      state.joined.position = qLen + 1;
+      state.joined.status = 'waiting';
+      pushToast('Joined queue', `You joined "${s.name}".`);
+      location.hash = '#/app/status';
+    } else {
+      pushToast('Error', 'Failed to join queue');
+    }
   });
 
   leaveBtn.addEventListener('click', () => {
@@ -608,14 +690,14 @@ function pageServiceManagement(){
     <tr>
       <td>${esc(s.name)}</td>
       <td><span class="tag muted">${esc(s.priority)}</span></td>
-      <td>${s.isOpen ? '<span class="tag ok">Open</span>' : '<span class="tag warn">Closed</span>'}</td>
+      <td>${(s.status === 'open' || s.isOpen) ? '<span class="tag ok">Open</span>' : '<span class="tag warn">Closed</span>'}</td>
       <td><button class="btn secondary" data-edit="${esc(s.id)}">Edit</button></td>
     </tr>
   `).join('');
 
   return `
     <p class="h1">Service Management</p>
-    <p class="p">Create or edit services (front-end only). Includes required validations.</p>
+    <p class="p">Create or edit services. Changes are saved to the database.</p>
 
     <div class="cards">
       <div class="card">
@@ -730,7 +812,7 @@ function bindServiceManagement(){
 
   qs('#clearBtn').addEventListener('click', resetForm);
 
-  qs('#saveBtn').addEventListener('click', () => {
+  qs('#saveBtn').addEventListener('click', async () => {
     if (!validate()) return;
 
     const payload = {
@@ -738,22 +820,40 @@ function bindServiceManagement(){
       description: desc.value.trim(),
       expectedDurationMin: Number(dur.value),
       priority: priority.value,
-      isOpen: isOpen.value === 'open',
+      status: isOpen.value === 'open' ? 'open' : 'closed'
     };
 
     if (editingId.value){
-      const s = state.services.find(x => x.id === editingId.value);
-      if (!s) return;
-      Object.assign(s, payload);
-      pushToast('Service updated', 'Edited service saved (mock).');
-    } else {
-      const id = 'svc-' + Math.random().toString(16).slice(2);
-      state.services.unshift({ id, ...payload });
-      pushToast('Service created', 'New service added (mock).');
-    }
+      // Update existing service
+      const result = await apiCall(`/services/${editingId.value}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
 
-    resetForm();
-    render();
+      if (result && result.success) {
+        pushToast('Service updated', 'Service changes saved to database.');
+        await loadServicesFromDB();
+        resetForm();
+        render();
+      } else {
+        pushToast('Error', 'Failed to update service');
+      }
+    } else {
+      // Create new service
+      const result = await apiCall('/services', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+
+      if (result && result.success) {
+        pushToast('Service created', 'Service added to database.');
+        await loadServicesFromDB();
+        resetForm();
+        render();
+      } else {
+        pushToast('Error', 'Failed to create service');
+      }
+    }
   });
 
   qsa('[data-edit]').forEach(btn => {
@@ -768,7 +868,8 @@ function bindServiceManagement(){
       desc.value = s.description;
       dur.value = String(s.expectedDurationMin);
       priority.value = s.priority;
-      isOpen.value = s.isOpen ? 'open' : 'closed';
+      // Handle both backend status field and frontend isOpen field
+      isOpen.value = (s.status === 'open' || s.isOpen) ? 'open' : 'closed';
       clearErrors();
     });
   });
@@ -962,5 +1063,12 @@ function render(){
 // Boot
 loadSession();
 window.addEventListener('hashchange', render);
-render();
-renderToasts();
+
+// Load data from backend
+Promise.all([
+  loadServicesFromDB(),
+  loadQueuesFromDB()
+]).then(() => {
+  render();
+  renderToasts();
+});

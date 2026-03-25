@@ -1,0 +1,88 @@
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 250px 1fr;
+  gap: 24px;
+  padding: 20px;
+}
+
+.panel {
+  background: white;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 24px;
+}
+
+.panelHeader {
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.badge {
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--bg-light);
+  color: var(--muted);
+  padding: 4px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nav a,
+.nav button {
+  padding: 10px 12px;
+  border-radius: 6px;
+  color: var(--text-light);
+  text-decoration: none;
+  transition: all 0.2s;
+  font-size: 14px;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  background: transparent;
+  font-family: inherit;
+  width: 100%;
+}
+
+.nav a:hover,
+.nav button:hover {
+  background: var(--bg-light);
+  color: var(--text);
+}
+
+.nav a.active {
+  background: var(--primary);
+  color: white;
+  font-weight: 600;
+}
+
+.p {
+  color: var(--text-light);
+  font-size: 14px;
+  line-height: 1.6;
+}
