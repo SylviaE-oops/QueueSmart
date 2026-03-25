@@ -1,6 +1,10 @@
 # QueueSmart Backend
 
-Simple setup for running the backend locally.
+## Don't touch these files please
+- middleware
+- middlewares
+- config
+
 
 ## Install
 
