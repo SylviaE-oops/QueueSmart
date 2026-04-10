@@ -7,5 +7,6 @@ const router = express.Router();
 router.post('/', authenticate, authorizeAdmin, ServiceController.create);
 router.get('/', ServiceController.list);
 router.put('/:id', authenticate, authorizeAdmin, ServiceController.update);
+router.delete('/:id', authenticate, authorizeAdmin, ServiceController.remove);
 
 module.exports = router;

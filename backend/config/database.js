@@ -1,23 +1,45 @@
-const mysql = require('mysql2/promise');
 require('dotenv').config();
 
-// Create MySQL Connection Pool
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || 'password',
-  database: process.env.DB_NAME || 'queuesmart',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
+let mysql = null;
+try {
+  mysql = require('mysql2/promise');
+} catch (error) {
+  console.warn('⚠ mysql2 is not installed yet. Run `npm install` in `backend` to enable MySQL persistence.');
+}
 
-// Test connection
-pool.getConnection().then(connection => {
-  console.log('✓ MySQL Database Connected Successfully');
-  connection.release();
-}).catch(err => {
-  console.error('✗ Database Connection Failed:', err.message);
-});
+const databaseEnabled =
+  process.env.NODE_ENV !== 'test'
+  && process.env.DB_ENABLED !== 'false'
+  && Boolean(mysql);
 
-module.exports = pool;
+const pool = databaseEnabled
+  ? mysql.createPool({
+      host: process.env.DB_HOST || 'localhost',
+      user: process.env.DB_USER || 'root',
+      password: process.env.DB_PASSWORD || 'password',//might have to change this if you have a different password or no password
+      database: process.env.DB_NAME || 'queuesmart',
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0
+    })
+  : null;
+
+if (pool) {
+  pool.getConnection()
+    .then((connection) => {
+      console.log('✓ MySQL Database Connected Successfully');
+      connection.release();
+    })
+    .catch((error) => {
+      console.warn(`⚠ MySQL unavailable, continuing with in-memory store: ${error.message}`);
+    });
+}
+
+function isDatabaseEnabled() {
+  return Boolean(pool);
+}
+
+module.exports = {
+  pool,
+  isDatabaseEnabled
+};

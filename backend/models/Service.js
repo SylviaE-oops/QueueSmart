@@ -1,60 +1,70 @@
-const pool = require('../config/database');
+const database = require('../config/database');
 const { SERVICE_STATUS } = require('../config/constants');
 
+const pool = database.pool || database;
+
 class Service {
-  // Create a new service
   static async create(serviceData) {
-    const { name, description, expectedDurationMin, priority, status = SERVICE_STATUS.OPEN } = serviceData;
+    const {
+      name,
+      description,
+      duration,
+      priority,
+      status = SERVICE_STATUS.OPEN
+    } = serviceData;
+
     const connection = await pool.getConnection();
     try {
       const [result] = await connection.query(
-        'INSERT INTO services (name, description, expectedDurationMin, priority, status) VALUES (?, ?, ?, ?, ?)',
-        [name, description, expectedDurationMin, priority, status]
+        'INSERT INTO services (name, description, duration, priority, status) VALUES (?, ?, ?, ?, ?)',
+        [name, description, duration, priority, status]
       );
-      return { id: result.insertId, ...serviceData };
+
+      return this.getById(result.insertId);
     } finally {
       connection.release();
     }
   }
 
-  // Get all services
   static async getAll() {
     const connection = await pool.getConnection();
     try {
-      const [services] = await connection.query('SELECT * FROM services');
+      const [services] = await connection.query(
+        'SELECT id, name, description, duration, priority, status FROM services ORDER BY id ASC'
+      );
       return services;
     } finally {
       connection.release();
     }
   }
 
-  // Get service by ID
   static async getById(id) {
     const connection = await pool.getConnection();
     try {
-      const [services] = await connection.query('SELECT * FROM services WHERE id = ?', [id]);
+      const [services] = await connection.query(
+        'SELECT id, name, description, duration, priority, status FROM services WHERE id = ?',
+        [id]
+      );
       return services[0] || null;
     } finally {
       connection.release();
     }
   }
 
-  // Update service
   static async update(id, updateData) {
     const connection = await pool.getConnection();
     try {
-      const { name, description, expectedDurationMin, priority, status } = updateData;
+      const { name, description, duration, priority, status } = updateData;
       await connection.query(
-        'UPDATE services SET name = ?, description = ?, expectedDurationMin = ?, priority = ?, status = ? WHERE id = ?',
-        [name, description, expectedDurationMin, priority, status, id]
+        'UPDATE services SET name = ?, description = ?, duration = ?, priority = ?, status = ? WHERE id = ?',
+        [name, description, duration, priority, status, id]
       );
-      return await this.getById(id);
+      return this.getById(id);
     } finally {
       connection.release();
     }
   }
 
-  // Delete service
   static async delete(id) {
     const connection = await pool.getConnection();
     try {
