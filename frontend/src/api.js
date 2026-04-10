@@ -1,6 +1,7 @@
 import { config } from './config';
 
 const API_URL = config.apiBaseUrl;
+const PRIORITY_MAP = { 1: 'low', 2: 'medium', 3: 'high' };
 
 function getAuthHeaders(extraHeaders = {}) {
   const userId = localStorage.getItem('qs_user_id');
@@ -12,13 +13,15 @@ function getAuthHeaders(extraHeaders = {}) {
 }
 
 function normalizeService(service) {
+  const numericPriority = Number(service.priority ?? 1);
+
   return {
-    id: service.id,
+    id: Number(service.id),
     name: service.name,
     description: service.description,
-    expectedDurationMin: service.duration,
-    priority: service.priority,
-    status: 'open'
+    expectedDurationMin: Number(service.duration ?? service.expectedDurationMin ?? 0),
+    priority: PRIORITY_MAP[numericPriority] || 'low',
+    status: service.status || 'open'
   };
 }
 
@@ -95,7 +98,8 @@ export async function createService(serviceData) {
       name: serviceData.name,
       description: serviceData.description,
       duration,
-      priority
+      priority,
+      status: serviceData.status || 'open'
     })
   });
 
@@ -118,7 +122,8 @@ export async function updateService(id, serviceData) {
       name: serviceData.name,
       description: serviceData.description,
       duration,
-      priority
+      priority,
+      status: serviceData.status || 'open'
     })
   });
 
@@ -129,12 +134,29 @@ export async function updateService(id, serviceData) {
 }
 
 export async function deleteService(id) {
-  return { success: false, error: 'Delete endpoint not implemented in backend' };
+  const result = await apiCall(`/services/${id}`, {
+    method: 'DELETE'
+  });
+
+  return {
+    success: true,
+    data: result
+  };
 }
 
 export async function loadQueues() {
-  // Queue listing needs a specific service in this backend.
-  return { success: true, data: [] };
+  const role = localStorage.getItem('qs_role');
+  const userId = localStorage.getItem('qs_user_id');
+
+  if (!userId || role !== 'admin') {
+    return { success: true, data: [] };
+  }
+
+  const result = await apiCall('/queue');
+  return {
+    success: true,
+    data: Array.isArray(result) ? result : []
+  };
 }
 
 export async function createQueue(queueData) {
@@ -143,6 +165,22 @@ export async function createQueue(queueData) {
     method: 'POST',
     body: JSON.stringify({
       serviceId: Number(queueData.serviceId),
+      userId
+    })
+  });
+
+  return {
+    success: true,
+    data: result
+  };
+}
+
+export async function leaveQueue(serviceId) {
+  const userId = Number(localStorage.getItem('qs_user_id'));
+  const result = await apiCall('/queue/leave', {
+    method: 'POST',
+    body: JSON.stringify({
+      serviceId: Number(serviceId),
       userId
     })
   });

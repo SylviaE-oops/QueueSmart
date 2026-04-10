@@ -1,107 +1,116 @@
-const pool = require('../config/database');
+const database = require('../config/database');
 const { QUEUE_STATUS } = require('../config/constants');
 
+const pool = database.pool || database;
+
+function mapQueueRow(row, index = 0) {
+  return {
+    id: Number(row.id),
+    serviceId: Number(row.serviceId),
+    userId: Number(row.userId),
+    priority: Number(row.priority),
+    status: row.status || QUEUE_STATUS.WAITING,
+    joinedAt: new Date(row.joinedAt).toISOString(),
+    position: index + 1
+  };
+}
+
 class Queue {
-  // Create a new queue entry
   static async create(queueData) {
-    const { email, serviceId, position, status = QUEUE_STATUS.WAITING } = queueData;
+    const {
+      serviceId,
+      userId,
+      priority = 1,
+      status = QUEUE_STATUS.WAITING,
+      joinedAt = new Date().toISOString()
+    } = queueData;
+
     const connection = await pool.getConnection();
     try {
       const [result] = await connection.query(
-        'INSERT INTO queues (email, serviceId, position, status) VALUES (?, ?, ?, ?)',
-        [email, serviceId, position, status]
+        'INSERT INTO queue_entries (serviceId, userId, priority, status, joinedAt) VALUES (?, ?, ?, ?, ?)',
+        [serviceId, userId, priority, status, joinedAt.slice(0, 19).replace('T', ' ')]
       );
-      return { id: result.insertId, ...queueData };
+
+      return this.getById(result.insertId);
     } finally {
       connection.release();
     }
   }
 
-  // Get all queues
   static async getAll() {
     const connection = await pool.getConnection();
     try {
-      const [queues] = await connection.query('SELECT * FROM queues ORDER BY position ASC');
-      return queues;
+      const [rows] = await connection.query(
+        'SELECT id, serviceId, userId, priority, status, joinedAt FROM queue_entries ORDER BY serviceId ASC, priority DESC, joinedAt ASC'
+      );
+
+      return rows.map(mapQueueRow);
     } finally {
       connection.release();
     }
   }
 
-  // Get queue by ID
   static async getById(id) {
     const connection = await pool.getConnection();
     try {
-      const [queues] = await connection.query('SELECT * FROM queues WHERE id = ?', [id]);
-      return queues[0] || null;
+      const [rows] = await connection.query(
+        'SELECT id, serviceId, userId, priority, status, joinedAt FROM queue_entries WHERE id = ?',
+        [id]
+      );
+      return rows[0] ? mapQueueRow(rows[0], 0) : null;
     } finally {
       connection.release();
     }
   }
 
-  // Get queues by service ID
   static async getByServiceId(serviceId) {
     const connection = await pool.getConnection();
     try {
-      const [queues] = await connection.query(
-        'SELECT * FROM queues WHERE serviceId = ? ORDER BY position ASC',
+      const [rows] = await connection.query(
+        'SELECT id, serviceId, userId, priority, status, joinedAt FROM queue_entries WHERE serviceId = ? ORDER BY priority DESC, joinedAt ASC',
         [serviceId]
       );
-      return queues;
+
+      return rows.map(mapQueueRow);
     } finally {
       connection.release();
     }
   }
 
-  // Get queues by email
-  static async getByEmail(email) {
+  static async getByUserId(userId) {
     const connection = await pool.getConnection();
     try {
-      const [queues] = await connection.query(
-        'SELECT * FROM queues WHERE email = ?',
-        [email]
+      const [rows] = await connection.query(
+        'SELECT id, serviceId, userId, priority, status, joinedAt FROM queue_entries WHERE userId = ? ORDER BY joinedAt ASC',
+        [userId]
       );
-      return queues;
+
+      return rows.map(mapQueueRow);
     } finally {
       connection.release();
     }
   }
 
-  // Update queue
-  static async update(id, updateData) {
-    const connection = await pool.getConnection();
-    try {
-      const { status, position } = updateData;
-      await connection.query(
-        'UPDATE queues SET status = ?, position = ? WHERE id = ?',
-        [status, position, id]
-      );
-      return await this.getById(id);
-    } finally {
-      connection.release();
-    }
-  }
-
-  // Delete queue
-  static async delete(id) {
-    const connection = await pool.getConnection();
-    try {
-      await connection.query('DELETE FROM queues WHERE id = ?', [id]);
-      return true;
-    } finally {
-      connection.release();
-    }
-  }
-
-  // Get queue length for a service
-  static async getQueueLength(serviceId) {
+  static async deleteByServiceAndUser(serviceId, userId) {
     const connection = await pool.getConnection();
     try {
       const [result] = await connection.query(
-        'SELECT COUNT(*) as count FROM queues WHERE serviceId = ? AND status IN (?, ?)',
-        [serviceId, QUEUE_STATUS.WAITING, QUEUE_STATUS.ALMOST_READY]
+        'DELETE FROM queue_entries WHERE serviceId = ? AND userId = ?',
+        [serviceId, userId]
       );
-      return result[0].count;
+
+      return result.affectedRows > 0;
+    } finally {
+      connection.release();
+    }
+  }
+
+  static async delete(id) {
+    const connection = await pool.getConnection();
+    try {
+      await connection.query('DELETE FROM queue_entries WHERE id = ?', [id]);
+      return true;
     } finally {
       connection.release();
     }

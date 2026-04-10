@@ -6,6 +6,7 @@ const serviceRoutes = require('./routes/serviceRoutes');
 const queueRoutes = require('./routes/queueRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const historyRoutes = require('./routes/historyRoutes');
+const requestLogger = require('./middleware/requestLogger');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -13,6 +14,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(requestLogger);
 
 app.get('/health', (req, res) => {
   return res.status(200).json({ status: 'ok' });

@@ -1,9 +1,9 @@
 const AuthService = require('../services/AuthService');
 const { createHttpError } = require('../services/errors');
 
-function authenticate(req, res, next) {
+async function authenticate(req, res, next) {
   try {
-    const user = AuthService.getUserFromHeader(req.header('x-user-id'));
+    const user = await AuthService.getUserFromHeader(req.header('x-user-id'));
     req.user = user;
     return next();
   } catch (error) {
