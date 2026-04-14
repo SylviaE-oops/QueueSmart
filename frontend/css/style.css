@@ -1,5 +1,5 @@
 :root {
-  --primary: #2563eb;
+  --primary: #2563eb; 
   --primary-dark: #1d4ed8;
   --text: #1f2937;
   --text-light: #6b7280;
@@ -175,13 +175,24 @@ body {
 
 .input {
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
   font-size: 14px;
-  font-family: inherit;
-  margin-bottom: 12px;
-  transition: border-color 0.2s;
+  margin-bottom: 14px;
+  background: #f9fafb;
+  transition: all 0.2s ease;
+}
+
+.input::placeholder {
+  color: #9ca3af;
+}
+
+.input:focus {
+  outline: none;
+  background: white;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1);
 }
 
 .input:focus {
@@ -202,17 +213,29 @@ textarea.input {
 }
 
 .btn {
-  padding: 10px 16px;
+  padding: 12px 18px;
   border: none;
-  border-radius: 6px;
+  border-radius: 12px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s;
-  background-color: var(--primary);
+  transition: all 0.2s ease;
+  background: linear-gradient(135deg, #4f46e5, #4338ca);
   color: white;
-  text-decoration: none;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 18px rgba(79, 70, 229, 0.25);
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(79, 70, 229, 0.35);
+  opacity: 0.95;
+}
+
+.btn:active {
+  transform: scale(0.98);
 }
 
 .btn:hover {
@@ -229,10 +252,13 @@ textarea.input {
 }
 
 .btn.secondary {
-  background-color: var(--bg-light);
-  color: var(--text);
+  background: #f3f4f6;
+  color: #111827;
   border: 1px solid var(--border);
+  box-shadow: none;
 }
+
+
 
 .btn.secondary:hover {
   background-color: #f3f4f6;
@@ -298,10 +324,16 @@ textarea.input {
 
 .card {
   background: white;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 16px;
-  box-shadow: var(--shadow);
+  border: 1px solid rgba(229, 231, 235, 0.7);
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+  transition: all 0.2s ease;
+}
+
+.card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.10);
 }
 
 .card strong {

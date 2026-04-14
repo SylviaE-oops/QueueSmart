@@ -2,7 +2,6 @@
   "name": "queuesmart-frontend",
   "version": "1.0.0",
   "description": "QueueSmart frontend with Preact and JSX",
-  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -14,5 +13,6 @@
   "devDependencies": {
     "@preact/preset-vite": "^2.8.2",
     "vite": "^5.0.8"
-  }
+  },
+  "type": "module"
 }
