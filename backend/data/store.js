@@ -1,7 +1,7 @@
 const store = {
   users: [
-    {id: 1, username: 'user1@cougarnet.uh.edu', password: 'password', role: 'user' },
-    {id: 2, username: 'admin@uh.edu', password: 'password', role: 'admin' }
+    { id: 1, username: 'user1@cougarnet.uh.edu', password: 'password', role: 'user' },
+    { id: 2, username: 'admin@uh.edu', password: 'password', role: 'admin' }
   ],
   services: [],
   queues: {},
@@ -9,7 +9,7 @@ const store = {
   notifications: [],
   counters: {
     userId: 3,
-    serviceId: 2,
+    serviceId: 1,
     historyId: 1,
     notificationId: 1
   }
@@ -41,6 +41,7 @@ function getUserById(userId) {
 function addService(serviceData) {
   const service = {
     id: nextId('serviceId'),
+    status: 'open',
     ...serviceData
   };
   store.services.push(service);
@@ -65,11 +66,31 @@ function updateService(serviceId, updates) {
   return service;
 }
 
+function deleteService(serviceId) {
+  const serviceIndex = store.services.findIndex((service) => service.id === serviceId);
+  if (serviceIndex === -1) {
+    return false;
+  }
+
+  store.services.splice(serviceIndex, 1);
+  delete store.queues[serviceId];
+  return true;
+}
+
 function getQueueByServiceId(serviceId) {
   if (!store.queues[serviceId]) {
     store.queues[serviceId] = [];
   }
   return store.queues[serviceId];
+}
+
+function getAllQueues() {
+  return Object.entries(store.queues).flatMap(([serviceId, queueItems]) =>
+    queueItems.map((item) => ({
+      serviceId: Number(serviceId),
+      ...item
+    }))
+  );
 }
 
 function setQueueForService(serviceId, queueItems) {
@@ -94,6 +115,9 @@ function addNotification(notificationData) {
   const notification = {
     id: nextId('notificationId'),
     createdAt: new Date().toISOString(),
+    read: false,
+    title: 'Notification',
+    type: 'info',
     ...notificationData
   };
   store.notifications.push(notification);
@@ -102,6 +126,19 @@ function addNotification(notificationData) {
 
 function getNotificationsByUserId(userId) {
   return store.notifications.filter((item) => item.userId === userId);
+}
+
+function markNotificationAsRead(userId, notificationId) {
+  const notification = store.notifications.find(
+    (item) => item.userId === userId && item.id === notificationId
+  );
+
+  if (!notification) {
+    return null;
+  }
+
+  notification.read = true;
+  return notification;
 }
 
 function resetStore() {
@@ -125,11 +162,14 @@ module.exports = {
   getAllServices,
   getServiceById,
   updateService,
+  deleteService,
   getQueueByServiceId,
+  getAllQueues,
   setQueueForService,
   addHistory,
   getHistoryByUserId,
   addNotification,
   getNotificationsByUserId,
+  markNotificationAsRead,
   resetStore
 };

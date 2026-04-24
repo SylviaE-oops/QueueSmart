@@ -1,24 +1,19 @@
 {
   "name": "queuesmart-backend",
-  "version": "1.0.0",
-  "description": "Backend API for QueueSmart",
+  "version": "2.0.0",
+  "description": "QueueSmart full-stack backend",
   "main": "server.js",
+  "type": "commonjs",
   "scripts": {
+    "migrate": "node migrate.js",
     "start": "node server.js",
-    "dev": "nodemon server.js",
-    "migrate": "node migrations/index.js",
-    "test": "jest --runInBand"
+    "dev": "node server.js"
   },
-  "keywords": ["queue", "smart"],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "express": "^4.18.2",
-    "dotenv": "^16.3.1",
-    "cors": "^2.8.5"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.1",
-    "jest": "^29.7.0"
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "mysql2": "^3.11.3"
   }
 }

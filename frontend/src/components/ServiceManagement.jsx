@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'preact/hooks';
-import { createService, updateService, deleteService } from '../api';
+import { createService, updateService, deleteService, loadLocations, createLocation, updateLocation, deleteLocation } from '../api';
 import styles from './ServiceManagement.module.css';
 
 export function ServiceManagement({ services, onShowToast, onUpdateServices }) {
@@ -12,6 +12,22 @@ export function ServiceManagement({ services, onShowToast, onUpdateServices }) {
   const [status, setStatus] = useState('open');
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+
+  // Location state
+  const [locations, setLocations] = useState([]);
+  const [locFormTitle, setLocFormTitle] = useState('Add Location');
+  const [locEditingId, setLocEditingId] = useState('');
+  const [locName, setLocName] = useState('');
+  const [locAddress, setLocAddress] = useState('');
+  const [locMaxQueues, setLocMaxQueues] = useState('1');
+  const [locErrors, setLocErrors] = useState({});
+  const [locLoading, setLocLoading] = useState(false);
+
+  useEffect(() => {
+    loadLocations().then((r) => { if (r.success) setLocations(r.data); });
+  }, []);
+
+  const refreshLocations = () => loadLocations().then((r) => { if (r.success) setLocations(r.data); });
 
   const clearErrors = () => setErrors({});
 
@@ -110,6 +126,66 @@ export function ServiceManagement({ services, onShowToast, onUpdateServices }) {
       await deleteService(id);
       onShowToast('Service deleted', 'Service removed from database.');
       onUpdateServices?.();
+    } catch (err) {
+      onShowToast('Error', err.message);
+    }
+  };
+
+  const validateLoc = () => {
+    const errs = {};
+    if (!locName.trim()) errs.name = 'Location name is required.';
+    else if (locName.trim().length > 255) errs.name = 'Name must be 255 characters or less.';
+    const mq = Number(locMaxQueues);
+    if (!Number.isInteger(mq) || mq < 1) errs.maxQueues = 'Max queues must be a positive whole number.';
+    setLocErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const resetLocForm = () => {
+    setLocEditingId('');
+    setLocFormTitle('Add Location');
+    setLocName('');
+    setLocAddress('');
+    setLocMaxQueues('1');
+    setLocErrors({});
+  };
+
+  const handleLocSave = async () => {
+    if (!validateLoc()) return;
+    const payload = { name: locName.trim(), address: locAddress.trim(), maxQueues: Number(locMaxQueues) };
+    setLocLoading(true);
+    try {
+      if (locEditingId) {
+        await updateLocation(locEditingId, payload);
+        onShowToast('Location updated', 'Changes saved to database.');
+      } else {
+        await createLocation(payload);
+        onShowToast('Location created', 'Location added to database.');
+      }
+      await refreshLocations();
+      resetLocForm();
+    } catch (err) {
+      onShowToast('Error', err.message);
+    } finally {
+      setLocLoading(false);
+    }
+  };
+
+  const handleLocEdit = (loc) => {
+    setLocEditingId(loc.id);
+    setLocFormTitle('Edit Location');
+    setLocName(loc.name);
+    setLocAddress(loc.address || '');
+    setLocMaxQueues(String(loc.maxQueues));
+    setLocErrors({});
+  };
+
+  const handleLocDelete = async (id) => {
+    if (!confirm('Delete this location? Book requests assigned to it will lose their location.')) return;
+    try {
+      await deleteLocation(id);
+      onShowToast('Location deleted', 'Location removed from database.');
+      await refreshLocations();
     } catch (err) {
       onShowToast('Error', err.message);
     }
@@ -233,6 +309,96 @@ export function ServiceManagement({ services, onShowToast, onUpdateServices }) {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* ── Location Management ──────────────────────────────────── */}
+      <p class={styles.h1} style="margin-top:32px;">Location Management</p>
+      <p class={styles.p}>Add and manage pickup locations. Each location can have multiple queues open at once.</p>
+
+      <div class={styles.cards}>
+        <div class={styles.card}>
+          <strong>{locFormTitle}</strong>
+
+          <label class={styles.label}>Location Name (required)</label>
+          <input
+            class={styles.input}
+            value={locName}
+            onInput={(e) => setLocName(e.target.value)}
+            placeholder="e.g. Library Block A"
+          />
+          {locErrors.name && <div class={styles.err}>{locErrors.name}</div>}
+
+          <label class={styles.label}>Address (optional)</label>
+          <input
+            class={styles.input}
+            value={locAddress}
+            onInput={(e) => setLocAddress(e.target.value)}
+            placeholder="e.g. Ground Floor, Building 2"
+          />
+
+          <label class={styles.label}>Max Queues at this location</label>
+          <input
+            class={styles.input}
+            type="number"
+            min="1"
+            value={locMaxQueues}
+            onInput={(e) => setLocMaxQueues(e.target.value)}
+          />
+          {locErrors.maxQueues && <div class={styles.err}>{locErrors.maxQueues}</div>}
+
+          <div class={styles.btnRow}>
+            <button class={styles.btn} onClick={handleLocSave} disabled={locLoading}>
+              {locLoading ? 'Saving...' : locEditingId ? 'Save changes' : 'Add location'}
+            </button>
+            <button class={`${styles.btn} ${styles.secondary}`} onClick={resetLocForm}>
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <div class={styles.card}>
+          <strong>Locations</strong>
+          <p class={styles.p} style="margin-top:8px;">Click "Edit" to modify a location.</p>
+          {locations.length === 0 ? (
+            <p class={styles.p}>No locations yet. Add one using the form.</p>
+          ) : (
+            <table class={styles.table}>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Address</th>
+                  <th>Max Queues</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {locations.map((loc) => (
+                  <tr key={loc.id}>
+                    <td>{loc.name}</td>
+                    <td>{loc.address || <span style="color:var(--text-light)">—</span>}</td>
+                    <td style="text-align:center;">{loc.maxQueues}</td>
+                    <td>
+                      <div class={styles.btnRow} style="margin:0;">
+                        <button
+                          class={`${styles.btn} ${styles.secondary}`}
+                          onClick={() => handleLocEdit(loc)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          class={`${styles.btn} ${styles.danger}`}
+                          onClick={() => handleLocDelete(loc.id)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>

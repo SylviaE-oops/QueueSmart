@@ -1,14 +1,21 @@
 import { useState, useEffect } from 'preact/hooks';
-import { createQueue, getQueuesByService } from '../api';
+import { createQueue, leaveQueue, getQueuesByService } from '../api';
 import styles from './JoinQueuePage.module.css';
 
 export function JoinQueuePage({ services, email, onShowToast, onUpdateQueues }) {
-  const [selectedServiceId, setSelectedServiceId] = useState(services[0]?.id || '');
+  const [selectedServiceId, setSelectedServiceId] = useState(services[0]?.id ? String(services[0].id) : '');
   const [joined, setJoined] = useState(false);
   const [loading, setLoading] = useState(false);
   const [queueLength, setQueueLength] = useState(0);
 
-  const service = services.find((s) => s.id === selectedServiceId);
+  useEffect(() => {
+    if (!selectedServiceId && services[0]?.id) {
+      setSelectedServiceId(String(services[0].id));
+    }
+  }, [services, selectedServiceId]);
+
+  const selectedId = Number(selectedServiceId);
+  const service = services.find((s) => Number(s.id) === selectedId);
 
   const estimateWaitTime = (position, duration) =>
     Math.max(0, (position - 1) * duration);
@@ -44,7 +51,7 @@ export function JoinQueuePage({ services, email, onShowToast, onUpdateQueues }) 
 
       if (result && result.success) {
         setJoined(true);
-        setQueueLength(queueLength + 1);
+        setQueueLength(result.data.length || queueLength + 1);
         onShowToast('Joined queue', `You joined "${service.name}".`);
         onUpdateQueues?.();
       }
@@ -55,11 +62,23 @@ export function JoinQueuePage({ services, email, onShowToast, onUpdateQueues }) 
     }
   };
 
-  const handleLeaveQueue = () => {
-    setJoined(false);
-    setQueueLength(Math.max(0, queueLength - 1));
-    onShowToast('Left queue', `You left the queue.`);
-    onUpdateQueues?.();
+  const handleLeaveQueue = async () => {
+    if (!selectedServiceId || !joined) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await leaveQueue(selectedServiceId);
+      setJoined(false);
+      setQueueLength(result?.data?.length || 0);
+      onShowToast('Left queue', 'You left the queue.');
+      onUpdateQueues?.();
+    } catch (err) {
+      onShowToast('Error', err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const estimatedWait = service
@@ -80,7 +99,7 @@ export function JoinQueuePage({ services, email, onShowToast, onUpdateQueues }) 
           disabled={joined}
         >
           {services.map((s) => (
-            <option key={s.id} value={s.id} disabled={s.status !== 'open'}>
+            <option key={s.id} value={String(s.id)} disabled={s.status !== 'open'}>
               {s.name} {s.status !== 'open' ? '(Closed)' : ''}
             </option>
           ))}
@@ -89,14 +108,14 @@ export function JoinQueuePage({ services, email, onShowToast, onUpdateQueues }) 
         <div class={styles.cards} style="margin-top:12px;">
           <div class={styles.card}>
             <div class={`${styles.tag} ${styles.muted}`}>Estimated wait time</div>
-            <strong>${estimatedWait} minutes</strong>
+            <strong>{estimatedWait} minutes</strong>
             <p class={styles.p} style="margin-top:8px;">
               Based on queue length × expected duration.
             </p>
           </div>
           <div class={styles.card}>
             <div class={`${styles.tag} ${styles.muted}`}>Current queue length</div>
-            <strong>${queueLength}</strong>
+            <strong>{queueLength}</strong>
             <p class={styles.p} style="margin-top:8px;">
               {service?.status === 'open' ? 'Service is open.' : 'Service is closed.'}
             </p>
@@ -114,9 +133,9 @@ export function JoinQueuePage({ services, email, onShowToast, onUpdateQueues }) 
           <button
             class={`${styles.btn} ${styles.danger}`}
             onClick={handleLeaveQueue}
-            disabled={!joined}
+            disabled={!joined || loading}
           >
-            Leave Queue
+            {loading && joined ? 'Leaving...' : 'Leave Queue'}
           </button>
         </div>
       </div>

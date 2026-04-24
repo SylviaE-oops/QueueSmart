@@ -20,6 +20,7 @@ export function Shell({
     ['#/admin/dashboard', 'Admin Dashboard'],
     ['#/admin/services', 'Service Management'],
     ['#/admin/queues', 'Queue Management'],
+    ['#/admin/book-requests', 'Book Requests'],
   ];
 
   const links = role === 'admin' ? linksAdmin : linksUser;
