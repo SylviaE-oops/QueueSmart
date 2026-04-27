@@ -11,6 +11,7 @@ const state = {
   adminStats: null,
   adminBookRequests: [],
   adminLocations: [],
+  adminSelectedServiceId: null,
   editingServiceId: null,
   editingLocationId: null,
   editingLocationOriginalName: null,
@@ -657,7 +658,10 @@ function adminBookRequestsPage() {
 }
 
 function queueManagementPage() {
-  const options = state.services.map((service) => `<option value="${service.id}">${esc(service.name)}</option>`).join('');
+  const selectedServiceId = Number(state.adminSelectedServiceId || state.services[0]?.id || 0);
+  const options = state.services
+    .map((service) => `<option value="${service.id}" ${service.id === selectedServiceId ? 'selected' : ''}>${esc(service.name)}</option>`)
+    .join('');
   return shellHtml(`
     <p class="h1">Queue Management</p>
     <p class="p">View a queue, serve the next user, move users up or down, or remove them.</p>
@@ -717,6 +721,13 @@ async function loadAdminStats() {
 async function loadAdminQueue(serviceId) {
   const data = await api(`/queues/service/${serviceId}`);
   state.adminQueue = data.queue;
+}
+
+function getAdminSelectedServiceId() {
+  const fallbackId = Number(state.services[0]?.id || 0);
+  const selectedId = Number(state.adminSelectedServiceId || fallbackId);
+  const exists = state.services.some((service) => service.id === selectedId);
+  return exists ? selectedId : fallbackId;
 }
 
 function bindLogin() {
@@ -1418,7 +1429,8 @@ function renderAdminQueueTable() {
 }
 
 async function persistQueueOrder() {
-  const serviceId = Number(qs('#adminServiceSel').value);
+  const serviceId = Number(qs('#adminServiceSel')?.value || getAdminSelectedServiceId());
+  state.adminSelectedServiceId = serviceId;
   await api('/admin/queue/reorder', {
     method: 'POST',
     body: JSON.stringify({ serviceId, orderedEntryIds: state.adminQueue.map((item) => item.id) }),
@@ -1428,8 +1440,10 @@ async function persistQueueOrder() {
 }
 
 async function afterAdminQueueChange() {
+  const currentSelection = Number(qs('#adminServiceSel')?.value || getAdminSelectedServiceId());
+  state.adminSelectedServiceId = currentSelection;
   await loadCommonData();
-  await loadAdminQueue(Number(qs('#adminServiceSel').value));
+  await loadAdminQueue(currentSelection);
   await loadAdminStats();
   render();
 }
@@ -1513,13 +1527,16 @@ function bindAdminBookRequests() {
 function bindQueueManagement() {
   const sel = qs('#adminServiceSel');
   sel.onchange = async () => {
-    await loadAdminQueue(Number(sel.value));
+    state.adminSelectedServiceId = Number(sel.value);
+    await loadAdminQueue(state.adminSelectedServiceId);
     renderAdminQueueTable();
   };
 
   qs('#serveNextBtn').onclick = async () => {
     try {
-      await api('/admin/queue/serve-next', { method: 'POST', body: JSON.stringify({ serviceId: Number(sel.value) }) });
+      const serviceId = Number(sel.value || getAdminSelectedServiceId());
+      state.adminSelectedServiceId = serviceId;
+      await api('/admin/queue/serve-next', { method: 'POST', body: JSON.stringify({ serviceId }) });
       pushToast('Queue updated', 'Next user served and notifications sent.');
       await afterAdminQueueChange();
     } catch (error) {
@@ -1565,9 +1582,9 @@ async function render() {
       app.innerHTML = serviceManagementPage();
     }
     else if (hash === '#/admin/queues') {
+      state.adminSelectedServiceId = getAdminSelectedServiceId();
+      if (state.adminSelectedServiceId) await loadAdminQueue(state.adminSelectedServiceId);
       app.innerHTML = queueManagementPage();
-      const firstServiceId = state.services[0]?.id;
-      if (firstServiceId) await loadAdminQueue(firstServiceId);
     }
     else if (hash === '#/admin/book-requests') {
       const [reqData, locData] = await Promise.all([
