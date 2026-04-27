@@ -81,13 +81,38 @@ async function api(path, options = {}) {
   return data;
 }
 
-function estimateWait(position, expectedDurationMin) {
-  return Math.max(0, (Number(position) - 1) * Number(expectedDurationMin || 0));
+function estimateWait(position, service = {}, queueLength = 0) {
+  const peopleAhead = Math.max(0, Number(position || 1) - 1);
+  const now = new Date();
+  const hour = now.getHours();
+  const month = now.getMonth() + 1;
+
+  const name = String(service.name || service.serviceName || '').toLowerCase();
+  const location = String(service.locationName || '').toLowerCase();
+
+  let baseMinutes = 4;
+
+  if (name.includes('library') || location.includes('library')) baseMinutes = 3;
+  if (name.includes('bookstore') || location.includes('bookstore')) baseMinutes = 5;
+  if (name.includes('law')) baseMinutes = 4;
+
+  let rushFactor = 1;
+
+  if (hour >= 11 && hour <= 14) rushFactor += 0.35;
+  if (hour >= 16 && hour <= 18) rushFactor += 0.25;
+  if ([1, 8, 9].includes(month)) rushFactor += 0.25;
+
+  const queuePressure = 1 + Math.min(Number(queueLength || 0), 20) * 0.02;
+
+  const prepTime = baseMinutes;
+
+  const minutes = Math.ceil(
+    prepTime + (peopleAhead * baseMinutes * rushFactor * queuePressure)
+  );
+
+  return Math.max(baseMinutes, minutes);
 }
 
-function serviceStatusTag(service) {
-  return service.isOpen ? '<span class="tag ok">Open</span>' : '<span class="tag warn">Closed</span>';
-}
 
 function shellHtml(content) {
   const active = location.hash || '#/login';
@@ -159,7 +184,6 @@ function loginPage() {
       <div class="err" id="err" style="display:none;"></div>
       <div class="btnRow">
         <button class="btn" id="loginBtn">Login</button>
-        <a class="btn secondary" href="#/register">Create account</a>
       </div>
       <p class="helper"><strong>Test users:</strong><br>
       Admin: admin@uh.edu / password<br>
@@ -191,6 +215,17 @@ function registerPage() {
       </div>
     `
   );
+}
+function serviceStatusTag(service) {
+  if (!service) {
+    return '<span class="tag muted">Unknown</span>';
+  }
+
+  if (service.isOpen) {
+    return '<span class="tag ok">Open</span>';
+  }
+
+  return '<span class="tag danger">Closed</span>';
 }
 
 function dashboardPage() {
@@ -301,6 +336,19 @@ function joinQueuePage() {
 
 function statusPage() {
   const entry = state.currentEntry;
+
+  const service = entry
+    ? state.services.find((s) => Number(s.id) === Number(entry.serviceId)) || {}
+    : {};
+
+  const waitMinutes = entry
+    ? estimateWait(
+        entry.position,
+        { ...service, ...entry },
+        Number(service.activeQueueLength || entry.position || 1)
+      )
+    : 0;
+
   return shellHtml(`
     <p class="h1">Queue Status</p>
     <p class="p">See your live position, estimated wait time, pickup location, and status updates.</p>
@@ -309,18 +357,40 @@ function statusPage() {
         <strong>Current Queue</strong>
         ${entry ? `
           <div class="row" style="margin-top:10px;">
-            <div><div class="tag muted">Service</div><p>${esc(entry.serviceName)}</p></div>
-            <div><div class="tag muted">Position</div><p>#${entry.position}</p></div>
+            <div>
+              <div class="tag muted">Service</div>
+              <p>${esc(entry.serviceName)}</p>
+            </div>
+            <div>
+              <div class="tag muted">Position</div>
+              <p>#${entry.position}</p>
+            </div>
           </div>
+
           <div class="row">
-            <div><div class="tag muted">Estimated wait</div><p>${entry.estimatedWaitMinutes} minutes</p></div>
-            <div><div class="tag muted">Pickup location</div><p>${esc(entry.locationName || '—')}</p></div>
+            <div>
+              <div class="tag muted">Estimated wait</div>
+              <p>${waitMinutes} minutes</p>
+            </div>
+            <div>
+              <div class="tag muted">Pickup location</div>
+              <p>${esc(entry.locationName || service.locationName || 'Campus Bookstore')}</p>
+            </div>
           </div>
+
           <div class="row">
-            <div><div class="tag muted">Status</div><p><span class="tag ${entry.status === 'almost_ready' ? 'warn' : 'muted'}">${esc(entry.status)}</span></p></div>
+            <div>
+              <div class="tag muted">Status</div>
+              <p>
+                <span class="tag ${entry.status === 'almost_ready' ? 'warn' : 'muted'}">
+                  ${esc(entry.status)}
+                </span>
+              </p>
+            </div>
           </div>
         ` : '<p class="empty">You are not currently in a queue.</p>'}
       </div>
+
       <div class="card">
         <strong>Status meaning</strong>
         <ul style="padding-left:18px; color:var(--muted); line-height:1.7;">
@@ -797,6 +867,17 @@ function joinQueueForLocation(serviceId, locationName) {
     }, 100);
   }
 }
+function extractLocationFromDescription(description = '') {
+  const text = String(description || '');
+
+  const match = text.match(/at the\s+(.+?)(\.|$)/i);
+
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+
+  return '';
+}
 
 function bindJoinQueue() {
   const serviceSel = qs('#serviceSel');
@@ -810,21 +891,40 @@ function bindJoinQueue() {
   function refreshCard() {
     const service = state.services.find((item) => String(item.id) === serviceSel.value);
     if (!service) return;
-    estWait.textContent = `${service.activeQueueLength} waiting`;
-    queueLen.textContent = service.activeQueueLength;
-    stockText.textContent = service.locationName || '—';
+
+    const previewPosition = Number(service.activeQueueLength || 0) + 1;
+    const waitMinutes = estimateWait(
+      previewPosition,
+      service,
+      Number(service.activeQueueLength || 0)
+    );
+
+    estWait.textContent = `${waitMinutes} minutes`;
+    queueLen.textContent = service.activeQueueLength || 0;
+    stockText.textContent =
+     service.locationName ||
+     service.location ||
+     service.pickupLocation ||
+     extractLocationFromDescription(service.description) ||
+     'Campus Bookstore';
     serviceMeta.textContent = `${service.description || ''}`;
+
     joinBtn.disabled = !!state.currentEntry || !service.isOpen;
     leaveBtn.disabled = !state.currentEntry;
   }
 
   serviceSel.onchange = refreshCard;
+
   joinBtn.onclick = async () => {
     try {
       await api('/queues/join', {
         method: 'POST',
-        body: JSON.stringify({ userId: state.user.id, serviceId: Number(serviceSel.value) }),
+        body: JSON.stringify({
+          userId: state.user.id,
+          serviceId: Number(serviceSel.value),
+        }),
       });
+
       pushToast('Joined queue', 'You successfully joined the queue.');
       await loadCommonData();
       render();
@@ -837,8 +937,11 @@ function bindJoinQueue() {
     try {
       await api('/queues/leave', {
         method: 'POST',
-        body: JSON.stringify({ userId: state.user.id }),
+        body: JSON.stringify({
+          userId: state.user.id,
+        }),
       });
+
       pushToast('Queue updated', 'You left the queue.');
       await loadCommonData();
       render();
