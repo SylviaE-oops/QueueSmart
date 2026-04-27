@@ -12,9 +12,10 @@ This version turns your A1-A4 QueueSmart project into a real full-stack app.
 - Notifications (in-app, email, SMS records)
 - Service management
 - Queue management (serve next, move up/down, remove)
-- Stock status / textbook availability
+- Stock status/textbook availability
 - Usage statistics
 - MySQL schema based on your A4 tables, extended with stock and pickup location
+- AI Agent that Recommends Queue
 
 ## Project structure
 
@@ -89,10 +90,10 @@ No location selection needed
 
 Admin:
 Reviews request
-Decides best location to prepare from
+Decides the best location to prepare from
 Marks ready + assigns location
-Student notified: "Your books are ready at [Location Name]"
+Student notified: "Your books are ready at [Location Name]."
 
 Student (after notification):
 Sees all pickup queues at that location
-Joins queue with lowest wait time
+Joins the queue with the lowest wait time
