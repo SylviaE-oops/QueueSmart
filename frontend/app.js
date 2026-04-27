@@ -87,7 +87,7 @@ function estimateWait(position, service = {}, queueLength = 0) {
   const hour = now.getHours();
   const month = now.getMonth() + 1;
 
-  const name = String(service.name || service.serviceName || service.serviceName || '').toLowerCase();
+  const name = String(service.name || service.serviceName || '').toLowerCase();
   const location = String(service.locationName || '').toLowerCase();
 
   let baseMinutes = 4;
@@ -98,21 +98,21 @@ function estimateWait(position, service = {}, queueLength = 0) {
 
   let rushFactor = 1;
 
-  // UH lunch rush
   if (hour >= 11 && hour <= 14) rushFactor += 0.35;
-
-  // UH after-class rush
   if (hour >= 16 && hour <= 18) rushFactor += 0.25;
-
-  // Start-of-semester rush: January, August, September
   if ([1, 8, 9].includes(month)) rushFactor += 0.25;
 
   const queuePressure = 1 + Math.min(Number(queueLength || 0), 20) * 0.02;
 
-  const minutes = Math.ceil(peopleAhead * baseMinutes * rushFactor * queuePressure);
+  const prepTime = baseMinutes;
 
-  return Math.max(1, minutes);
+  const minutes = Math.ceil(
+    prepTime + (peopleAhead * baseMinutes * rushFactor * queuePressure)
+  );
+
+  return Math.max(baseMinutes, minutes);
 }
+
 
 function shellHtml(content) {
   const active = location.hash || '#/login';
@@ -374,7 +374,7 @@ function statusPage() {
             </div>
             <div>
               <div class="tag muted">Pickup location</div>
-              <p>${esc(entry.locationName || '—')}</p>
+              <p>${esc(entry.locationName || service.locationName || 'Campus Bookstore')}</p>
             </div>
           </div>
 
@@ -867,6 +867,17 @@ function joinQueueForLocation(serviceId, locationName) {
     }, 100);
   }
 }
+function extractLocationFromDescription(description = '') {
+  const text = String(description || '');
+
+  const match = text.match(/at the\s+(.+?)(\.|$)/i);
+
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+
+  return '';
+}
 
 function bindJoinQueue() {
   const serviceSel = qs('#serviceSel');
@@ -890,7 +901,12 @@ function bindJoinQueue() {
 
     estWait.textContent = `${waitMinutes} minutes`;
     queueLen.textContent = service.activeQueueLength || 0;
-    stockText.textContent = service.locationName || '—';
+    stockText.textContent =
+     service.locationName ||
+     service.location ||
+     service.pickupLocation ||
+     extractLocationFromDescription(service.description) ||
+     'Campus Bookstore';
     serviceMeta.textContent = `${service.description || ''}`;
 
     joinBtn.disabled = !!state.currentEntry || !service.isOpen;
