@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:5001/api'; // Changed port to 5001 because 5000 was already in use
+const API_BASE = 'http://localhost:5000/api';
 
 const state = {
   user: JSON.parse(localStorage.getItem('qs_user') || 'null'),
@@ -113,6 +113,76 @@ function estimateWait(position, service = {}, queueLength = 0) {
   return Math.max(baseMinutes, minutes);
 }
 
+
+function extractLocationFromDescription(description = '') {
+  const text = String(description || '');
+  const match = text.match(/at the\s+(.+?)(\.|$)/i);
+
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+
+  return '';
+}
+
+function getPickupLocation(service = {}, entry = {}) {
+  const name = String(entry.serviceName || service.name || '').toLowerCase();
+
+  if (name.includes('library')) return 'UH Library Pickup Desk';
+  if (name.includes('bookstore')) return 'Campus Bookstore';
+  if (name.includes('law')) return 'Law Center Pickup Desk';
+
+  return (
+    entry.locationName ||
+    service.locationName ||
+    service.location ||
+    service.pickupLocation ||
+    extractLocationFromDescription(service.description) ||
+    'Pickup Desk'
+  );
+}
+
+function getSmartQueueRecommendation(services = []) {
+  const openServices = services.filter((s) => s.isOpen);
+
+  if (!openServices.length) {
+    return {
+      title: 'No queue recommended',
+      message: 'All pickup queues are currently closed.',
+    };
+  }
+
+  const ranked = openServices
+    .map((service) => {
+      const previewPosition = Number(service.activeQueueLength || 0) + 1;
+      const waitMinutes = estimateWait(
+        previewPosition,
+        service,
+        Number(service.activeQueueLength || 0)
+      );
+
+      let score = waitMinutes + Number(service.activeQueueLength || 0) * 2;
+
+      const name = String(service.name || '').toLowerCase();
+
+      if (name.includes('library')) score -= 1;
+      if (name.includes('bookstore')) score += 1;
+
+      return {
+        service,
+        waitMinutes,
+        score,
+      };
+    })
+    .sort((a, b) => a.score - b.score);
+
+  const best = ranked[0];
+
+  return {
+    title: `${best.service.name} is the best choice`,
+    message: `AI recommendation: join ${best.service.name}. Estimated wait is ${best.waitMinutes} minutes with ${best.service.activeQueueLength || 0} people currently in line. Pickup location: ${getPickupLocation(best.service)}.`,
+  };
+}
 
 function shellHtml(content) {
   const active = location.hash || '#/login';
@@ -317,6 +387,16 @@ function joinQueuePage() {
     <p class="h1">Join Queue</p>
     <p class="p">Pick up your ready textbooks or join any available queue.</p>
     ${readySection}
+    ${(() => {
+      const ai = getSmartQueueRecommendation(availableServices);
+      return `
+        <div class="card" style="border: 2px solid var(--ok); margin-bottom: 14px;">
+          <strong>AI Smart Queue Advisor</strong>
+          <p class="p" style="margin-top:8px;">${esc(ai.title)}</p>
+          <p class="helper">${esc(ai.message)}</p>
+        </div>
+      `;
+    })()}
     <div class="card">
         <label class="label">${orSelectLabel}</label>
       <select class="input" id="serviceSel">${serviceOptions}</select>
