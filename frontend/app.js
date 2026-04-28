@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = 'http://localhost:5001/api'; // changed to 5001 for testing purpose
 
 const state = {
   user: JSON.parse(localStorage.getItem('qs_user') || 'null'),
@@ -187,20 +187,21 @@ function getSmartQueueRecommendation(services = []) {
 function shellHtml(content) {
   const active = location.hash || '#/login';
   const userLinks = [
-    ['#/app/dashboard', 'User Dashboard'],
-    ['#/app/join', 'Join Queue'],
-    ['#/app/status', 'Queue Status'],
-    ['#/app/book-requests', 'Book Requests'],
-    ['#/app/history', 'History'],
-    ['#/app/notifications', 'Notifications'],
-  ];
-  const adminLinks = [
-    ['#/admin/dashboard', 'Admin Dashboard'],
-    ['#/admin/services', 'Queue Setup'],
-    ['#/admin/queues', 'Queue Management'],
-    ['#/admin/book-requests', 'Book Requests'],
-    ['#/admin/stats', 'Usage Statistics'],
-  ];
+  ['#/app/dashboard', '📊 User Dashboard'],
+  ['#/app/join', '➕ Join Queue'],
+  ['#/app/status', '📋 Queue Status'],
+  ['#/app/book-requests', '📚 Book Requests'],
+  ['#/app/history', '🕒 History'],
+  ['#/app/notifications', '🔔 Notifications'],
+];
+
+const adminLinks = [
+  ['#/admin/dashboard', '📊 Admin Dashboard'],
+  ['#/admin/services', '⚙️ Queue Setup'],
+  ['#/admin/queues', '👥 Queue Management'],
+  ['#/admin/book-requests', '📚 Book Requests'],
+  ['#/admin/stats', '📈 Usage Statistics'],
+];
   const links = state.user?.role === 'admin' ? adminLinks : userLinks;
   const navLinks = links.map(([href, label]) => `<a class="${active === href ? 'active' : ''}" href="${href}">${label}</a>`).join('');
 

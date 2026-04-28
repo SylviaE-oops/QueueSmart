@@ -1,5 +1,14 @@
-import { useState } from 'preact/hooks';
 import styles from './Shell.module.css';
+import {
+  MdDashboard,
+  MdAddCircle,
+  MdListAlt,
+  MdHistory,
+  MdSettings,
+  MdGroups,
+  MdMenuBook,
+  MdLogout
+} from 'react-icons/md';
 
 export function Shell({
   role,
@@ -10,17 +19,17 @@ export function Shell({
   onNavigate
 }) {
   const linksUser = [
-    ['#/app/dashboard', 'User Dashboard'],
-    ['#/app/join', 'Join Queue'],
-    ['#/app/status', 'Queue Status'],
-    ['#/app/history', 'History'],
+    ['#/app/dashboard', 'User Dashboard', MdDashboard],
+    ['#/app/join', 'Join Queue', MdAddCircle],
+    ['#/app/status', 'Queue Status', MdListAlt],
+    ['#/app/history', 'History', MdHistory],
   ];
 
   const linksAdmin = [
-    ['#/admin/dashboard', 'Admin Dashboard'],
-    ['#/admin/services', 'Service Management'],
-    ['#/admin/queues', 'Queue Management'],
-    ['#/admin/book-requests', 'Book Requests'],
+    ['#/admin/dashboard', 'Admin Dashboard', MdDashboard],
+    ['#/admin/services', 'Service Management', MdSettings],
+    ['#/admin/queues', 'Queue Management', MdGroups],
+    ['#/admin/book-requests', 'Book Requests', MdMenuBook],
   ];
 
   const links = role === 'admin' ? linksAdmin : linksUser;
@@ -46,7 +55,7 @@ export function Shell({
           </div>
 
           <nav class={styles.nav}>
-            {links.map(([href, label]) => (
+            {links.map(([href, label, Icon]) => (
               <a
                 key={href}
                 href={href}
@@ -56,10 +65,13 @@ export function Shell({
                   onNavigate(href);
                 }}
               >
+                <Icon class={styles.navIcon} />
                 {label}
               </a>
             ))}
+
             <button class={`${styles.btn} ${styles.secondary}`} onClick={onLogout}>
+              <MdLogout class={styles.navIcon} />
               Logout
             </button>
           </nav>

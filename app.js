@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = 'http://localhost:5001/api'; // changed to 5001 for local purpose 
 
 const state = {
   user: JSON.parse(localStorage.getItem('qs_user') || 'null'),

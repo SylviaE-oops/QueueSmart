@@ -1,6 +1,7 @@
 import { useState } from 'preact/hooks';
 import { loginUser } from '../api';
 import styles from './LoginPage.module.css';
+import { MdLogin, MdPersonAdd } from "react-icons/md";
 
 export function LoginPage({ onLoginSuccess, onNavigate, onShowToast }) {
   const [email, setEmail] = useState('');
@@ -76,11 +77,17 @@ export function LoginPage({ onLoginSuccess, onNavigate, onShowToast }) {
 
           <div class={styles.btnRow}>
             <button class={styles.btn} onClick={handleLogin} disabled={loading}>
-              {loading ? 'Logging in...' : 'Login'}
-            </button>
+  {loading ? 'Logging in...' : (
+    <>
+      <MdLogin class={styles.btnIcon} />
+      Login
+    </>
+  )}
+</button>
             <button class={`${styles.btn} ${styles.secondary}`} onClick={() => onNavigate('#/register')}>
-              Create account
-            </button>
+  <MdPersonAdd class={styles.btnIcon} />
+  Create account
+</button>
           </div>
 
           <p class={styles.p} style="margin-top:14px;">

@@ -86,3 +86,9 @@
   font-size: 14px;
   line-height: 1.6;
 }
+
+.navIcon {
+  font-size: 18px;
+  margin-right: 10px;
+  vertical-align: middle;
+}

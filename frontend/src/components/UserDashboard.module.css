@@ -96,3 +96,24 @@
 .table tbody tr:hover {
   background: var(--bg-light);
 }
+
+
+.titleIcon {
+  font-size: 30px;
+  margin-right: 10px;
+  vertical-align: middle;
+  color: #2563eb;
+}
+
+.cardIcon {
+  font-size: 18px;
+  margin-right: 6px;
+  vertical-align: middle;
+  color: #2563eb;
+}
+
+.cardTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
