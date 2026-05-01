@@ -127,8 +127,6 @@ Open the URL printed in the terminal (usually **http://localhost:3000**).
 | Admin | `admin@uh.edu` | `password` |
 | User | `user@cougarnet.uh.edu` | `password` |
 
-Or register a new account from the login page.
-
 ---
 
 ## API reference
