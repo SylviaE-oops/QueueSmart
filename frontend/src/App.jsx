@@ -6,6 +6,7 @@ import { UserDashboard } from './components/UserDashboard';
 import { JoinQueuePage } from './components/JoinQueuePage';
 import { ServiceManagement } from './components/ServiceManagement';
 import { AdminBookRequests } from './components/AdminBookRequests';
+import { AdminReports } from './components/AdminReports';
 import { ToastContainer } from './components/Toast';
 import { loadServices, loadQueues } from './api';
 import './base.css';
@@ -190,6 +191,10 @@ export function App() {
   } else if (route === '#/admin/book-requests') {
     content = (
       <AdminBookRequests onShowToast={pushToast} />
+    );
+  } else if (route === '#/admin/reports') {
+    content = (
+      <AdminReports onShowToast={pushToast} />
     );
   } else if (route === '#/admin/dashboard') {
     content = (

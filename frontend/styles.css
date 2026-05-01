@@ -165,3 +165,179 @@ textarea{min-height:90px; resize:vertical}
   position: relative;
   z-index: 1;
 }
+
+.statsFilters {
+  margin-bottom: 12px;
+}
+
+.statsCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.statsCardHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.compactCards {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.statsMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.chartBars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(32px, 1fr));
+  gap: 8px;
+  align-items: end;
+  margin-top: 12px;
+  min-height: 140px;
+}
+
+.chartBarWrap {
+  display: flex;
+  flex-direction: column;
+  justify-content: end;
+  align-items: center;
+  gap: 6px;
+}
+
+.chartBarWrap span {
+  font-size: 11px;
+  color: var(--muted);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  max-height: 90px;
+}
+
+.chartBar {
+  width: 100%;
+  min-width: 18px;
+  border-radius: 10px 10px 4px 4px;
+  background: linear-gradient(180deg, rgba(200,16,46,.65), rgba(200,16,46,.18));
+  border: 1px solid var(--border);
+}
+
+.heatGrid {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(14px, 1fr));
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.heatCell {
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: var(--text);
+  background: rgba(200,16,46,.05);
+}
+
+.heatCell.level0 { background: rgba(200,16,46,.04); }
+.heatCell.level1 { background: rgba(200,16,46,.12); }
+.heatCell.level2 { background: rgba(200,16,46,.22); }
+.heatCell.level3 { background: rgba(200,16,46,.32); }
+.heatCell.level4 { background: rgba(200,16,46,.46); color: #fff; }
+
+.visitList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.visitItem {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.statsTable td details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+@media (max-width: 920px) {
+  .compactCards {
+    grid-template-columns: 1fr;
+  }
+
+  .heatGrid {
+    grid-template-columns: repeat(12, minmax(18px, 1fr));
+  }
+
+  .visitItem {
+    grid-template-columns: 1fr;
+  }
+
+  .statsCardHeader {
+    flex-direction: column;
+  }
+}
+
+/* ── CSV export options panel ────────────────────────────────────────────── */
+.csvOptions {
+  margin-top: 10px;
+}
+
+.csvOptionsBody {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 8px;
+  padding: 12px;
+  background: var(--bg, #f9fafb);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+}
+
+.csvOptionGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+}
+
+.csvOptionGroup strong {
+  font-size: 12px;
+  margin-bottom: 4px;
+  color: var(--muted, #555);
+}
+
+.csvOptionGroup label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ── Print / PDF export ──────────────────────────────────────────────────── */
+/* The PDF report opens in its own window via printStatsReport().            */
+/* This block only applies if the user prints the main app directly.         */
+@media print {
+  .shell-nav,
+  .shell-header,
+  .statsFilters,
+  .btnRow {
+    display: none !important;
+  }
+}

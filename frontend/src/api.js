@@ -261,3 +261,16 @@ export async function updateBookRequestStatus(id, status, locationId = null) {
   });
   return { success: true, data: result };
 }
+
+export async function loadAdminReports() {
+  const result = await apiCall('/admin/reports');
+  return {
+    success: true,
+    data: {
+      overview: result.overview || {},
+      users: result.users || [],
+      services: result.services || [],
+      queueUsage: result.queueUsage || { statusBreakdown: [] },
+    },
+  };
+}

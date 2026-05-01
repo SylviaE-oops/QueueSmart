@@ -7,6 +7,7 @@ import {
   MdSettings,
   MdGroups,
   MdMenuBook,
+  MdAssessment,
   MdLogout
 } from 'react-icons/md';
 
@@ -30,6 +31,7 @@ export function Shell({
     ['#/admin/services', 'Service Management', MdSettings],
     ['#/admin/queues', 'Queue Management', MdGroups],
     ['#/admin/book-requests', 'Book Requests', MdMenuBook],
+    ['#/admin/reports', 'Stats Reporting', MdAssessment],
   ];
 
   const links = role === 'admin' ? linksAdmin : linksUser;

@@ -1,7 +1,5 @@
 # QueueSmart Full-Stack App
 
-This version turns your A1-A4 QueueSmart project into a real full-stack app.
-
 ## Included features
 
 - Login and registration
@@ -82,18 +80,3 @@ Or register a new account through the frontend registration page.
 - Notifications are stored in MySQL. Email/SMS are represented as notification records to match your assignment features without requiring third-party providers.
 - The UI keeps the visual style from your uploaded `index.html`, `styles.css`, and `app.js`.
 
-
-##UPDATE (2/4)
-Student:
-Requests books (just: title, quantity)
-No location selection needed
-
-Admin:
-Reviews request
-Decides the best location to prepare from
-Marks ready + assigns location
-Student notified: "Your books are ready at [Location Name]."
-
-Student (after notification):
-Sees all pickup queues at that location
-Joins the queue with the lowest wait time

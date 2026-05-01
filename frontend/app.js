@@ -9,6 +9,11 @@ const state = {
   bookRequests: [],
   adminQueue: [],
   adminStats: null,
+  adminStatsFilters: {
+    period: 'monthly',
+    serviceId: '',
+    userId: '',
+  },
   adminBookRequests: [],
   adminLocations: [],
   adminSelectedServiceId: null,
@@ -825,25 +830,818 @@ function queueManagementPage() {
   `);
 }
 
+function formatDateTime(value) {
+  if (!value) return '—';
+  return new Date(value).toLocaleString();
+}
+
+function formatMinutes(value) {
+  if (value === null || value === undefined || value === '') return 'N/A';
+  return `${Number(value).toFixed(1)} min`;
+}
+
+function formatPercent(value) {
+  if (value === null || value === undefined || value === '') return 'N/A';
+  return `${Number(value).toFixed(1)}%`;
+}
+
+function statsStatusTag(status) {
+  const normalized = String(status || '').toLowerCase();
+  const className = normalized === 'served'
+    ? 'ok'
+    : normalized === 'canceled'
+      ? 'warn'
+      : normalized === 'no-show'
+        ? 'danger'
+        : 'muted';
+
+  return `<span class="tag ${className}">${esc(normalized || 'unknown')}</span>`;
+}
+
+function renderTimelineChart(points = [], canvasId = '') {
+  if (!points.length) {
+    return '<p class="empty">No trend data available for this filter.</p>';
+  }
+  return `<div style="position:relative;height:180px;"><canvas id="${esc(canvasId)}"></canvas></div>`;
+}
+
+function renderHeatmap(cells = []) {
+  if (!cells.length) {
+    return '<p class="empty">No heatmap data available.</p>';
+  }
+
+  const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const counts = new Map(cells.map((cell) => [`${cell.day}-${cell.hour}`, Number(cell.total || 0)]));
+  const maxCount = Math.max(...cells.map((cell) => Number(cell.total || 0)), 1);
+  const items = [];
+
+  for (let day = 0; day < 7; day += 1) {
+    for (let hour = 0; hour < 24; hour += 1) {
+      const total = counts.get(`${day}-${hour}`) || 0;
+      const level = Math.ceil((total / maxCount) * 4);
+      items.push(`
+        <div class="heatCell level${level}" title="${labels[day]} ${String(hour).padStart(2, '0')}:00 - ${total} joins">
+          <span>${total}</span>
+        </div>
+      `);
+    }
+  }
+
+  return `<div class="heatGrid">${items.join('')}</div>`;
+}
+
+function buildAdminStatsQuery() {
+  const params = new URLSearchParams();
+  const filters = state.adminStatsFilters || {};
+
+  params.set('period', filters.period || 'monthly');
+  if (filters.serviceId) params.set('serviceId', filters.serviceId);
+  if (filters.userId) params.set('userId', filters.userId);
+
+  return params.toString();
+}
+
 function statsPage() {
-  const totals = state.adminStats?.totals || {};
-  const rows = (state.adminStats?.serviceStats || []).map((row) => `
+  const report = state.adminStats || {};
+  const filters = state.adminStatsFilters || {};
+  const overview = report.overview || {};
+  const queueUsage = report.queueUsage || {};
+  const users = report.users || [];
+  const services = report.services || [];
+  const serviceOptions = state.services.map((service) => `
+    <option value="${service.id}" ${String(filters.serviceId || '') === String(service.id) ? 'selected' : ''}>${esc(service.name)}</option>
+  `).join('');
+  const userRows = users.map((user) => `
     <tr>
-      <td>${esc(row.name)}</td>
-      <td>${row.activeQueueLength}</td>
-      <td>${row.totalServed}</td>
+      <td>${user.userId}</td>
+      <td><strong>${esc(user.fullName)}</strong><br><span class="helper">${esc(user.contactInfo)}</span></td>
+      <td>${user.totalVisits}</td>
+      <td>${formatMinutes(user.averageWaitMinutes)}</td>
+      <td>
+        ${user.visits.length ? `
+          <details>
+            <summary>View ${user.visits.length} visits</summary>
+            <div class="visitList">
+              ${user.visits.map((visit) => `
+                <div class="visitItem">
+                  <strong>${esc(visit.serviceName)}</strong>
+                  <span>${formatDateTime(visit.joinedAt)}</span>
+                  <span>${statsStatusTag(visit.status)}</span>
+                  <span>${formatMinutes(visit.waitMinutes)}</span>
+                </div>
+              `).join('')}
+            </div>
+          </details>
+        ` : '<span class="empty">No visits</span>'}
+      </td>
     </tr>
   `).join('');
+  const serviceCards = services.map((service) => `
+    <div class="card statsCard">
+      <div class="statsCardHeader">
+        <div>
+          <strong>${esc(service.name)}</strong>
+          <p class="p">${esc(service.description || 'No description available.')}</p>
+        </div>
+        <span class="tag ${service.isOpen ? 'ok' : 'danger'}">${service.isOpen ? 'Open' : 'Closed'}</span>
+      </div>
+      <div class="cards three compactCards">
+        <div class="card kpi"><div><div class="tag muted">Served</div><strong>${service.totalUsersServed || 0}</strong></div><span class="tag ok">Completed</span></div>
+        <div class="card kpi"><div><div class="tag muted">Max Queue</div><strong>${service.maximumQueueLength || 0}</strong></div><span class="tag warn">Peak</span></div>
+        <div class="card kpi"><div><div class="tag muted">Avg Wait</div><strong>${formatMinutes(service.averageWaitMinutes)}</strong></div><span class="tag muted">Filtered</span></div>
+      </div>
+      <div class="row">
+        <div class="card">
+          <strong>Queue length over time</strong>
+          ${renderTimelineChart(service.queueLengthTimeline || [], `chart-svc-${service.id}`)}
+        </div>
+        <div class="card">
+          <strong>Busy-hour heatmap</strong>
+          ${renderHeatmap(service.busyHourHeatmap || [])}
+        </div>
+      </div>
+      <div class="statsMeta">
+        <span><strong>Location:</strong> ${esc(service.locationName || 'Unassigned')}</span>
+        <span><strong>Peak hours:</strong> ${(service.peakHours || []).map((item) => `${String(item.hour).padStart(2, '0')}:00 (${item.total})`).join(', ') || 'N/A'}</span>
+        <span><strong>Handling time:</strong> min ${formatMinutes(service.handlingTime?.min)}, max ${formatMinutes(service.handlingTime?.max)}, avg ${formatMinutes(service.handlingTime?.average)}</span>
+      </div>
+    </div>
+  `).join('');
+  const statusRows = (queueUsage.statusBreakdown || []).map((row) => `
+    <tr>
+      <td>${statsStatusTag(row.status)}</td>
+      <td>${row.total}</td>
+    </tr>
+  `).join('');
+
   return shellHtml(`
     <p class="h1">Usage Statistics</p>
-    <p class="p">Semester demand, service load, total notifications, and served counts.</p>
-    <div class="cards three">
-      <div class="card kpi"><div><div class="tag muted">Users</div><strong>${totals.users || 0}</strong></div><span class="tag muted">Registered</span></div>
-      <div class="card kpi"><div><div class="tag muted">Active Queue Entries</div><strong>${totals.activeQueueEntries || 0}</strong></div><span class="tag warn">Live</span></div>
-      <div class="card kpi"><div><div class="tag muted">Notifications Sent</div><strong>${totals.notificationsSent || 0}</strong></div><span class="tag ok">Tracked</span></div>
+    <p class="p">Detailed user reports, service activity reporting, and queue performance KPIs with date, service, and user filters.</p>
+
+    <div class="card statsFilters">
+      <div class="row">
+        <div>
+          <label class="label">Date range</label>
+          <select class="input" id="statsPeriodSel">
+            <option value="daily" ${filters.period === 'daily' ? 'selected' : ''}>Daily</option>
+            <option value="weekly" ${filters.period === 'weekly' ? 'selected' : ''}>Weekly</option>
+            <option value="monthly" ${filters.period === 'monthly' ? 'selected' : ''}>Monthly</option>
+          </select>
+        </div>
+        <div>
+          <label class="label">Specific service</label>
+          <select class="input" id="statsServiceSel">
+            <option value="">All services</option>
+            ${serviceOptions}
+          </select>
+        </div>
+        <div>
+          <label class="label">Individual user lookup</label>
+          <input class="input" id="statsUserIdInput" type="number" min="1" value="${esc(filters.userId || '')}" placeholder="Enter user ID" />
+        </div>
+      </div>
+      <div class="btnRow">
+        <button class="btn" id="applyStatsFiltersBtn">Apply filters</button>
+        <button class="btn secondary" id="resetStatsFiltersBtn">Reset</button>
+        <button class="btn secondary" id="exportStatsCsvBtn">&#8595; Export CSV</button>
+        <button class="btn secondary" id="printStatsBtn">&#128438; Print / PDF</button>
+      </div>
+      <details class="csvOptions">
+        <summary class="helper" style="cursor:pointer;">CSV export options &rsaquo;</summary>
+        <div class="csvOptionsBody">
+          <div class="csvOptionGroup">
+            <strong>Datasets to include</strong>
+            <label><input type="checkbox" id="csvExportOverview" checked /> Overview metrics</label>
+            <label><input type="checkbox" id="csvExportStatus" checked /> Queue status breakdown</label>
+            <label><input type="checkbox" id="csvExportUsers" checked /> User participation data</label>
+            <label><input type="checkbox" id="csvExportServices" checked /> Service &amp; queue activity</label>
+          </div>
+          <div class="csvOptionGroup">
+            <strong>User visit columns</strong>
+            <label><input type="checkbox" id="csvColUserId" checked /> User ID</label>
+            <label><input type="checkbox" id="csvColUserName" checked /> User Name</label>
+            <label><input type="checkbox" id="csvColEmail" checked /> Email</label>
+            <label><input type="checkbox" id="csvColService" checked /> Service</label>
+            <label><input type="checkbox" id="csvColJoinTime" checked /> Join Time</label>
+            <label><input type="checkbox" id="csvColEndTime" checked /> End Time</label>
+            <label><input type="checkbox" id="csvColStatus" checked /> Status</label>
+            <label><input type="checkbox" id="csvColWaitTime" checked /> Wait Time</label>
+          </div>
+        </div>
+      </details>
+      <p class="helper">Report generated: ${formatDateTime(report.filters?.generatedAt)}</p>
     </div>
-    <div class="card" style="margin-top:12px;"><table class="table"><thead><tr><th>Service</th><th>Current Queue</th><th>Total Served</th></tr></thead><tbody>${rows}</tbody></table></div>
+
+    <div class="cards three">
+      <div class="card kpi"><div><div class="tag muted">Total Users Served</div><strong>${overview.totalUsersServed || 0}</strong></div><span class="tag ok">KPI</span></div>
+      <div class="card kpi"><div><div class="tag muted">Average Wait Time</div><strong>${formatMinutes(overview.averageWaitTime)}</strong></div><span class="tag warn">KPI</span></div>
+      <div class="card kpi"><div><div class="tag muted">Average Service Time</div><strong>${formatMinutes(overview.averageServiceTime)}</strong></div><span class="tag muted">KPI</span></div>
+      <div class="card kpi"><div><div class="tag muted">Maximum Queue Length</div><strong>${overview.maximumQueueLength || 0}</strong></div><span class="tag danger">KPI</span></div>
+      <div class="card kpi"><div><div class="tag muted">Drop-off Rate</div><strong>${formatPercent(overview.dropOffRate)}</strong></div><span class="tag warn">KPI</span></div>
+      <div class="card kpi"><div><div class="tag muted">Queue Efficiency</div><strong>${formatPercent(overview.queueEfficiencyRate)}</strong></div><span class="tag ok">KPI</span></div>
+    </div>
+
+    <div class="row" style="margin-top:12px;">
+      <div class="card">
+        <strong>Queue activity over time</strong>
+        <p class="p helper">How queue load changed across the selected period</p>
+        ${renderTimelineChart(queueUsage.queueLengthTimeline || [], 'chart-overall-queue')}
+      </div>
+      <div class="card">
+        <strong>Visit status distribution</strong>
+        <p class="p helper">Proportion of served, cancelled, and no-show visits</p>
+        <div style="position:relative;height:180px;"><canvas id="chart-status-pie"></canvas></div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:12px;">
+      <div class="card">
+        <strong>Users served per service</strong>
+        <p class="p helper">Which services handle the most traffic</p>
+        <div style="position:relative;height:220px;"><canvas id="chart-service-users"></canvas></div>
+      </div>
+      <div class="card">
+        <strong>Average wait time per service</strong>
+        <p class="p helper">Spot slow or overloaded services</p>
+        <div style="position:relative;height:220px;"><canvas id="chart-service-wait"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
+      <strong>Wait time distribution</strong>
+      <p class="p helper">How wait times spread across all visits — most users wait how long?</p>
+      <div style="position:relative;height:180px;"><canvas id="chart-wait-histogram"></canvas></div>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
+      <strong>User / Customer Reports</strong>
+      <p class="p">Includes user ID, contact information, total visits, average wait time, and visit-by-visit queue participation history.</p>
+      <div class="tableScroll">
+        <table class="table statsTable"><thead><tr><th>User ID</th><th>User</th><th>Total Visits</th><th>Avg Wait</th><th>Visit History</th></tr></thead><tbody>${userRows || '<tr><td colspan="5" class="empty">No user activity matches the current filters.</td></tr>'}</tbody></table>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:12px; margin-top:12px;">
+      ${serviceCards || '<div class="card"><p class="empty">No service activity matches the current filters.</p></div>'}
+    </div>
   `);
+}
+
+function csvCell(value) {
+  if (value === null || value === undefined) return '';
+  const str = String(value);
+  // RFC 4180: quote if contains comma, double-quote, newline, or carriage return
+  if (/[,"\r\n]/.test(str)) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+}
+
+function isoTs(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString();
+}
+
+function safeNum(value, decimals = 2) {
+  if (value === null || value === undefined || value === '') return '';
+  const n = Number(value);
+  return Number.isNaN(n) ? '' : n.toFixed(decimals);
+}
+
+function exportStatsCSV() {
+  const report   = state.adminStats || {};
+  const filters  = report.filters  || {};
+  const overview = report.overview || {};
+  const users    = report.users    || [];
+  const services = report.services || [];
+  const queueUsage = report.queueUsage || {};
+  const appliedFilters = state.adminStatsFilters || {};
+
+  // ── Which datasets to export (from checkboxes) ─────────────────────────
+  const exportOverview  = qs('#csvExportOverview')  ? qs('#csvExportOverview').checked  : true;
+  const exportUsers     = qs('#csvExportUsers')     ? qs('#csvExportUsers').checked     : true;
+  const exportServices  = qs('#csvExportServices')  ? qs('#csvExportServices').checked  : true;
+  const exportStatus    = qs('#csvExportStatus')    ? qs('#csvExportStatus').checked    : true;
+
+  // ── Which user-visit columns to include ────────────────────────────────
+  const colUserId    = !qs('#csvColUserId')    || qs('#csvColUserId').checked;
+  const colUserName  = !qs('#csvColUserName')  || qs('#csvColUserName').checked;
+  const colEmail     = !qs('#csvColEmail')     || qs('#csvColEmail').checked;
+  const colService   = !qs('#csvColService')   || qs('#csvColService').checked;
+  const colJoinTime  = !qs('#csvColJoinTime')  || qs('#csvColJoinTime').checked;
+  const colStatus    = !qs('#csvColStatus')    || qs('#csvColStatus').checked;
+  const colWaitTime  = !qs('#csvColWaitTime')  || qs('#csvColWaitTime').checked;
+  const colEndTime   = !qs('#csvColEndTime')   || qs('#csvColEndTime').checked;
+
+  const nowIso  = new Date().toISOString();
+  const period  = filters.period || appliedFilters.period || 'all';
+  const serviceFilter = appliedFilters.serviceId
+    ? (services.find((s) => String(s.id) === String(appliedFilters.serviceId))?.name || `ID ${appliedFilters.serviceId}`)
+    : 'All services';
+  const userFilter = appliedFilters.userId ? `User ID ${appliedFilters.userId}` : 'All users';
+
+  const files = [];
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 1.  REPORT METADATA  (always included, separate sheet marker)
+  // ═══════════════════════════════════════════════════════════════════════
+  const metaRows = [
+    ['# QueueSmart Usage Statistics Report'],
+    ['# Generated at (ISO 8601)', nowIso],
+    ['# Period filter', period],
+    ['# Service filter', serviceFilter],
+    ['# User filter', userFilter],
+    [],
+  ];
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 2.  OVERVIEW METRICS
+  // ═══════════════════════════════════════════════════════════════════════
+  if (exportOverview) {
+    metaRows.push(['[OVERVIEW METRICS]']);
+    metaRows.push(['Metric', 'Value', 'Unit']);
+    metaRows.push(['Total Users Served',   overview.totalUsersServed ?? 0,                    'count']);
+    metaRows.push(['Total Visits',          overview.totalVisits ?? 0,                         'count']);
+    metaRows.push(['Total Unique Users',    overview.totalUsers ?? 0,                          'count']);
+    metaRows.push(['Average Wait Time',     safeNum(overview.averageWaitTime),                 'minutes']);
+    metaRows.push(['Average Service Time',  safeNum(overview.averageServiceTime),              'minutes']);
+    metaRows.push(['Max Queue Length',      overview.maximumQueueLength ?? 0,                  'entries']);
+    metaRows.push(['Drop-off Rate',         safeNum(overview.dropOffRate, 1),                  'percent']);
+    metaRows.push(['Queue Efficiency Rate', safeNum(overview.queueEfficiencyRate, 1),          'percent']);
+    metaRows.push([]);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 3.  VISIT STATUS BREAKDOWN
+  // ═══════════════════════════════════════════════════════════════════════
+  if (exportStatus) {
+    metaRows.push(['[QUEUE STATUS BREAKDOWN]']);
+    metaRows.push(['Status', 'Total', 'Share (%)']);
+    const totalVisits = overview.totalVisits || 0;
+    for (const row of (queueUsage.statusBreakdown || [])) {
+      const share = totalVisits ? safeNum((row.total / totalVisits) * 100, 1) : '';
+      metaRows.push([csvCell(row.status), row.total, share]);
+    }
+    metaRows.push([]);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 4.  USER PARTICIPATION  —  one flat row per visit
+  //     Spec: User ID, User Name, Service, Join Time, Start Time (n/a),
+  //           End Time, Status, Wait Time (mins)
+  // ═══════════════════════════════════════════════════════════════════════
+  if (exportUsers) {
+    metaRows.push(['[USER PARTICIPATION DATA]']);
+
+    const headers = [];
+    if (colUserId)   headers.push('User ID');
+    if (colUserName) headers.push('User Name');
+    if (colEmail)    headers.push('Email');
+    if (colService)  headers.push('Service');
+    if (colJoinTime) headers.push('Join Time (ISO 8601)');
+    if (colStatus)   headers.push('Status');
+    if (colWaitTime) headers.push('Wait Time (mins)');
+    if (colEndTime)  headers.push('End Time (ISO 8601)');
+    headers.push('Visit #', 'Total Visits for User', 'Avg Wait for User (mins)');
+    metaRows.push(headers);
+
+    // Preserve interface sort order (already alpha by fullName from backend)
+    for (const user of users) {
+      const visits = user.visits; // already sorted newest-first from backend
+      if (!visits.length) {
+        const row = [];
+        if (colUserId)   row.push(user.userId);
+        if (colUserName) row.push(csvCell(user.fullName));
+        if (colEmail)    row.push(csvCell(user.email));
+        if (colService)  row.push('');
+        if (colJoinTime) row.push('');
+        if (colStatus)   row.push('');
+        if (colWaitTime) row.push('');
+        if (colEndTime)  row.push('');
+        row.push(1, user.totalVisits, safeNum(user.averageWaitMinutes));
+        metaRows.push(row);
+        continue;
+      }
+      visits.forEach((visit, idx) => {
+        const row = [];
+        if (colUserId)   row.push(user.userId);
+        if (colUserName) row.push(csvCell(user.fullName));
+        if (colEmail)    row.push(csvCell(user.email));
+        if (colService)  row.push(csvCell(visit.serviceName));
+        if (colJoinTime) row.push(isoTs(visit.joinedAt));
+        if (colStatus)   row.push(csvCell(visit.status));
+        if (colWaitTime) row.push(safeNum(visit.waitMinutes));
+        if (colEndTime)  row.push(isoTs(visit.terminalTime));
+        row.push(idx + 1, user.totalVisits, safeNum(user.averageWaitMinutes));
+        metaRows.push(row);
+      });
+    }
+    metaRows.push([]);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 5.  SERVICE & QUEUE ACTIVITY
+  // ═══════════════════════════════════════════════════════════════════════
+  if (exportServices) {
+    metaRows.push(['[SERVICE & QUEUE ACTIVITY]']);
+    metaRows.push([
+      'Service', 'Location', 'Status',
+      'Total Visits', 'Users Served', 'Drop-offs',
+      'Max Queue Length',
+      'Avg Wait Time (mins)', 'Min Handling Time (mins)', 'Avg Handling Time (mins)', 'Max Handling Time (mins)',
+      'Peak Hour 1', 'Peak Hour 2', 'Peak Hour 3',
+    ]);
+    for (const svc of services) {
+      const peaks = (svc.peakHours || []).slice(0, 3).map((p) => `${String(p.hour).padStart(2, '0')}:00 (${p.total})`);
+      metaRows.push([
+        csvCell(svc.name),
+        csvCell(svc.locationName || ''),
+        svc.isOpen ? 'Open' : 'Closed',
+        svc.totalVisits,
+        svc.totalUsersServed,
+        svc.dropOffs,
+        svc.maximumQueueLength,
+        safeNum(svc.averageWaitMinutes),
+        safeNum(svc.handlingTime?.min),
+        safeNum(svc.handlingTime?.average),
+        safeNum(svc.handlingTime?.max),
+        csvCell(peaks[0] || ''),
+        csvCell(peaks[1] || ''),
+        csvCell(peaks[2] || ''),
+      ]);
+    }
+    metaRows.push([]);
+  }
+
+  // ── Serialise rows to CSV string ───────────────────────────────────────
+  const csv = metaRows
+    .map((row) => row.map((cell) => csvCell(cell === undefined ? '' : cell)).join(','))
+    .join('\r\n');
+
+  // ── BOM + download ─────────────────────────────────────────────────────
+  // UTF-8 BOM so Excel opens it correctly without import wizard
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `queuesmart-report-${period}-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function printStatsReport() {
+  const report = state.adminStats || {};
+  const filters = report.filters || {};
+  const appliedFilters = state.adminStatsFilters || {};
+  const overview = report.overview || {};
+  const users = report.users || [];
+  const services = report.services || [];
+  const queueUsage = report.queueUsage || {};
+  const generatedAt = new Date(filters.generatedAt || Date.now()).toLocaleString();
+
+  // Capture a Chart.js canvas as a base64 PNG; returns empty string if not found
+  function chartImg(id, altText) {
+    const canvas = document.getElementById(id);
+    if (!canvas) return `<p style="color:#888;font-style:italic;">${altText || 'No chart data'}</p>`;
+    return `<img src="${canvas.toDataURL('image/png')}" alt="${altText || id}" style="width:100%;max-height:260px;object-fit:contain;display:block;" />`;
+  }
+
+  // Filter description
+  const periodLabel = { daily: 'Last 24 hours', weekly: 'Last 7 days', monthly: 'Last 30 days', all: 'All time' };
+  const filterLines = [
+    `Period: ${periodLabel[appliedFilters.period || 'monthly'] || appliedFilters.period || 'Monthly'}`,
+    `Service: ${appliedFilters.serviceId ? (services.find((s) => String(s.id) === String(appliedFilters.serviceId))?.name || `ID ${appliedFilters.serviceId}`) : 'All services'}`,
+    `User: ${appliedFilters.userId ? `User ID ${appliedFilters.userId}` : 'All users'}`,
+  ];
+
+  // User report table rows — visits expanded inline (no <details>)
+  const userTableRows = users.map((user) => {
+    if (!user.visits.length) {
+      return `<tr>
+        <td>${user.userId}</td><td>${esc(user.fullName)}</td><td>${esc(user.email)}</td>
+        <td>0</td><td>N/A</td><td colspan="4" style="color:#888;">No visits</td>
+      </tr>`;
+    }
+    return user.visits.map((visit, i) => `<tr>
+      ${i === 0 ? `<td rowspan="${user.visits.length}">${user.userId}</td>
+        <td rowspan="${user.visits.length}">${esc(user.fullName)}</td>
+        <td rowspan="${user.visits.length}">${esc(user.email)}</td>
+        <td rowspan="${user.visits.length}">${user.totalVisits}</td>
+        <td rowspan="${user.visits.length}">${user.averageWaitMinutes != null ? Number(user.averageWaitMinutes).toFixed(1) + ' min' : 'N/A'}</td>` : ''}
+      <td>${esc(visit.serviceName)}</td>
+      <td>${new Date(visit.joinedAt).toLocaleString()}</td>
+      <td>${esc(visit.status)}</td>
+      <td>${visit.waitMinutes != null ? Number(visit.waitMinutes).toFixed(1) + ' min' : 'N/A'}</td>
+    </tr>`).join('');
+  }).join('');
+
+  // Service summary table
+  const svcTableRows = services.map((svc) => {
+    const peak = (svc.peakHours || []).slice(0, 3).map((p) => `${String(p.hour).padStart(2, '0')}:00`).join(', ') || 'N/A';
+    return `<tr>
+      <td>${esc(svc.name)}</td>
+      <td>${esc(svc.locationName || '—')}</td>
+      <td>${svc.isOpen ? 'Open' : 'Closed'}</td>
+      <td>${svc.totalVisits}</td>
+      <td>${svc.totalUsersServed}</td>
+      <td>${svc.maximumQueueLength}</td>
+      <td>${svc.averageWaitMinutes != null ? Number(svc.averageWaitMinutes).toFixed(1) + ' min' : 'N/A'}</td>
+      <td>${svc.dropOffs}</td>
+      <td>${esc(peak)}</td>
+    </tr>`;
+  }).join('');
+
+  // Status breakdown table
+  const statusTableRows = (queueUsage.statusBreakdown || []).map((row) => `<tr><td>${esc(row.status)}</td><td>${row.total}</td></tr>`).join('');
+
+  const CSS = `
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 10pt; color: #111; background: #fff; padding: 20mm 15mm; }
+    h1 { font-size: 20pt; color: #3730a3; margin-bottom: 4pt; }
+    h2 { font-size: 13pt; color: #3730a3; margin: 18pt 0 6pt; border-bottom: 1.5px solid #c7d2fe; padding-bottom: 3pt; }
+    h3 { font-size: 11pt; margin: 12pt 0 4pt; }
+    .subtitle { color: #555; font-size: 10pt; margin-bottom: 12pt; }
+    .meta { background: #f5f3ff; border: 1px solid #c7d2fe; border-radius: 6px; padding: 10pt 14pt; margin-bottom: 14pt; font-size: 9.5pt; }
+    .meta p { margin: 2pt 0; }
+    .meta strong { color: #3730a3; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8pt; margin-bottom: 14pt; }
+    .kpi-card { border: 1px solid #e0e7ff; border-radius: 6px; padding: 10pt; }
+    .kpi-label { font-size: 8.5pt; color: #555; margin-bottom: 3pt; }
+    .kpi-value { font-size: 16pt; font-weight: bold; color: #111; }
+    .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10pt; margin-bottom: 14pt; }
+    .chart-box { border: 1px solid #e5e7eb; border-radius: 6px; padding: 10pt; }
+    .chart-box h3 { font-size: 9.5pt; color: #444; margin-bottom: 6pt; }
+    .chart-full { border: 1px solid #e5e7eb; border-radius: 6px; padding: 10pt; margin-bottom: 14pt; }
+    .chart-full h3 { font-size: 9.5pt; color: #444; margin-bottom: 6pt; }
+    table { width: 100%; border-collapse: collapse; font-size: 9pt; margin-bottom: 14pt; }
+    th { background: #ede9fe; color: #3730a3; font-weight: 600; padding: 5pt 6pt; text-align: left; border: 1px solid #c4b5fd; }
+    td { padding: 4pt 6pt; border: 1px solid #e5e7eb; vertical-align: top; }
+    tr:nth-child(even) td { background: #f9fafb; }
+    .svc-card { border: 1px solid #e0e7ff; border-radius: 6px; padding: 10pt 14pt; margin-bottom: 12pt; break-inside: avoid; }
+    .svc-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8pt; }
+    .svc-card-name { font-size: 12pt; font-weight: bold; }
+    .svc-card-meta { font-size: 8.5pt; color: #666; margin-top: 2pt; }
+    .svc-kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6pt; margin-bottom: 8pt; }
+    .svc-kpi { background: #f5f3ff; border-radius: 4px; padding: 6pt; }
+    .svc-kpi-label { font-size: 7.5pt; color: #888; }
+    .svc-kpi-val { font-size: 13pt; font-weight: bold; }
+    .badge { display: inline-block; padding: 1pt 7pt; border-radius: 10pt; font-size: 8pt; font-weight: 600; }
+    .badge-ok { background: #dcfce7; color: #166534; }
+    .badge-warn { background: #fef3c7; color: #92400e; }
+    .badge-closed { background: #fee2e2; color: #991b1b; }
+    .footer { margin-top: 20pt; border-top: 1px solid #e5e7eb; padding-top: 8pt; font-size: 8.5pt; color: #999; text-align: center; }
+    @media print {
+      body { padding: 0; }
+      h2 { break-after: avoid; }
+      .svc-card { break-inside: avoid; }
+      .chart-box, .chart-full { break-inside: avoid; }
+    }
+  `;
+
+  const svcDetailSections = services.map((svc) => {
+    const peak = (svc.peakHours || []).map((p) => `${String(p.hour).padStart(2, '0')}:00 (${p.total})`).join(', ') || 'N/A';
+    return `
+      <div class="svc-card">
+        <div class="svc-card-header">
+          <div>
+            <div class="svc-card-name">${esc(svc.name)}</div>
+            <div class="svc-card-meta">
+              ${esc(svc.description || '')}
+              ${svc.locationName ? ` &nbsp;·&nbsp; ${esc(svc.locationName)}` : ''}
+            </div>
+          </div>
+          <span class="badge ${svc.isOpen ? 'badge-ok' : 'badge-closed'}">${svc.isOpen ? 'Open' : 'Closed'}</span>
+        </div>
+        <div class="svc-kpi-row">
+          <div class="svc-kpi"><div class="svc-kpi-label">Users Served</div><div class="svc-kpi-val">${svc.totalUsersServed}</div></div>
+          <div class="svc-kpi"><div class="svc-kpi-label">Max Queue Length</div><div class="svc-kpi-val">${svc.maximumQueueLength}</div></div>
+          <div class="svc-kpi"><div class="svc-kpi-label">Avg Wait</div><div class="svc-kpi-val">${svc.averageWaitMinutes != null ? Number(svc.averageWaitMinutes).toFixed(1) + ' min' : 'N/A'}</div></div>
+          <div class="svc-kpi"><div class="svc-kpi-label">Drop-offs</div><div class="svc-kpi-val">${svc.dropOffs}</div></div>
+        </div>
+        <div class="charts-grid">
+          <div class="chart-box"><h3>Queue Load Over Time</h3>${chartImg(`chart-svc-${svc.id}`, 'Queue timeline')}</div>
+          <div class="chart-box"><h3>Handling Time</h3>
+            <table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>
+              <tr><td>Min</td><td>${svc.handlingTime?.min != null ? Number(svc.handlingTime.min).toFixed(1) + ' min' : 'N/A'}</td></tr>
+              <tr><td>Avg</td><td>${svc.handlingTime?.average != null ? Number(svc.handlingTime.average).toFixed(1) + ' min' : 'N/A'}</td></tr>
+              <tr><td>Max</td><td>${svc.handlingTime?.max != null ? Number(svc.handlingTime.max).toFixed(1) + ' min' : 'N/A'}</td></tr>
+              <tr><td>Peak hours</td><td>${esc(peak)}</td></tr>
+            </tbody></table>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>QueueSmart Report &mdash; ${esc(appliedFilters.period || 'monthly')}</title>
+  <style>${CSS}</style>
+</head>
+<body>
+
+  <h1>QueueSmart &mdash; Usage Statistics Report</h1>
+  <p class="subtitle">Analytics and performance report for administrators</p>
+
+  <div class="meta">
+    <p><strong>Generated at:</strong> ${generatedAt}</p>
+    ${filterLines.map((line) => `<p><strong>${esc(line.split(':')[0])}:</strong> ${esc(line.split(':').slice(1).join(':').trim())}</p>`).join('')}
+  </div>
+
+  <h2>Overview KPIs</h2>
+  <div class="kpi-grid">
+    <div class="kpi-card"><div class="kpi-label">Total Users Served</div><div class="kpi-value">${overview.totalUsersServed ?? 0}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Average Wait Time</div><div class="kpi-value">${overview.averageWaitTime != null ? Number(overview.averageWaitTime).toFixed(1) + ' min' : 'N/A'}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Average Service Time</div><div class="kpi-value">${overview.averageServiceTime != null ? Number(overview.averageServiceTime).toFixed(1) + ' min' : 'N/A'}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Max Queue Length</div><div class="kpi-value">${overview.maximumQueueLength ?? 0}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Drop-off Rate</div><div class="kpi-value">${overview.dropOffRate != null ? Number(overview.dropOffRate).toFixed(1) + '%' : 'N/A'}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Queue Efficiency</div><div class="kpi-value">${overview.queueEfficiencyRate != null ? Number(overview.queueEfficiencyRate).toFixed(1) + '%' : 'N/A'}</div></div>
+  </div>
+
+  <h2>Queue Analytics</h2>
+  <div class="charts-grid">
+    <div class="chart-box"><h3>Queue Activity Over Time</h3>${chartImg('chart-overall-queue', 'Queue activity chart')}</div>
+    <div class="chart-box"><h3>Visit Status Distribution</h3>${chartImg('chart-status-pie', 'Status distribution chart')}</div>
+  </div>
+  <div class="charts-grid">
+    <div class="chart-box"><h3>Users Served per Service</h3>${chartImg('chart-service-users', 'Users per service chart')}</div>
+    <div class="chart-box"><h3>Average Wait Time per Service</h3>${chartImg('chart-service-wait', 'Wait time per service chart')}</div>
+  </div>
+  <div class="chart-full"><h3>Wait Time Distribution</h3>${chartImg('chart-wait-histogram', 'Wait time histogram')}</div>
+
+  <h2>Visit Status Breakdown</h2>
+  <table>
+    <thead><tr><th>Status</th><th>Total Visits</th></tr></thead>
+    <tbody>${statusTableRows || '<tr><td colspan="2">No data</td></tr>'}</tbody>
+  </table>
+
+  <h2>Service Performance Summary</h2>
+  <table>
+    <thead><tr><th>Service</th><th>Location</th><th>Status</th><th>Visits</th><th>Served</th><th>Max Queue</th><th>Avg Wait</th><th>Drop-offs</th><th>Peak Hours</th></tr></thead>
+    <tbody>${svcTableRows || '<tr><td colspan="9">No service data</td></tr>'}</tbody>
+  </table>
+
+  <h2>Service Detail</h2>
+  ${svcDetailSections || '<p style="color:#888;">No service data available for the selected filters.</p>'}
+
+  <h2>User Activity Report</h2>
+  <table>
+    <thead><tr><th>User ID</th><th>Full Name</th><th>Email</th><th>Visits</th><th>Avg Wait</th><th>Service</th><th>Joined At</th><th>Status</th><th>Wait</th></tr></thead>
+    <tbody>${userTableRows || '<tr><td colspan="9">No user activity for selected filters.</td></tr>'}</tbody>
+  </table>
+
+  <div class="footer">QueueSmart &mdash; Report generated ${generatedAt} &mdash; Confidential</div>
+
+</body>
+</html>`;
+
+  const win = window.open('', '_blank', 'width=960,height=800,scrollbars=yes');
+  if (!win) {
+    alert('Pop-up blocked. Please allow pop-ups for this site to generate PDF reports.');
+    return;
+  }
+  win.document.write(html);
+  win.document.close();
+  // Give images and layout a moment to settle before triggering print
+  win.setTimeout(() => { win.focus(); win.print(); }, 400);
+}
+
+function initStatsCharts() {
+  if (typeof Chart === 'undefined') return;
+
+  (state._charts || []).forEach((c) => { try { c.destroy(); } catch (_) {} });
+  state._charts = [];
+
+  const report = state.adminStats || {};
+  const queueUsage = report.queueUsage || {};
+  const services = report.services || [];
+  const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#06b6d4'];
+
+  function mkChart(id, config) {
+    const canvas = document.getElementById(id);
+    if (!canvas) return;
+    const chart = new Chart(canvas, config);
+    state._charts.push(chart);
+  }
+
+  const baseOpts = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+  };
+
+  // 1. Queue activity over time — area chart
+  const timeline = queueUsage.queueLengthTimeline || [];
+  mkChart('chart-overall-queue', {
+    type: 'line',
+    data: {
+      labels: timeline.map((p) => p.label),
+      datasets: [{
+        label: 'Queue length',
+        data: timeline.map((p) => p.queueLength),
+        fill: true,
+        borderColor: '#6366f1',
+        backgroundColor: 'rgba(99,102,241,0.12)',
+        tension: 0.35,
+        pointRadius: 3,
+      }],
+    },
+    options: { ...baseOpts, scales: { y: { beginAtZero: true } } },
+  });
+
+  // 2. Visit status distribution — pie chart
+  const statusBreakdown = queueUsage.statusBreakdown || [];
+  mkChart('chart-status-pie', {
+    type: 'pie',
+    data: {
+      labels: statusBreakdown.map((s) => s.status),
+      datasets: [{ data: statusBreakdown.map((s) => s.total), backgroundColor: COLORS }],
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } },
+  });
+
+  // 3. Users served per service — bar chart
+  mkChart('chart-service-users', {
+    type: 'bar',
+    data: {
+      labels: services.map((s) => s.name),
+      datasets: [{
+        label: 'Users served',
+        data: services.map((s) => s.totalUsersServed),
+        backgroundColor: COLORS.slice(0, services.length),
+        borderRadius: 4,
+      }],
+    },
+    options: { ...baseOpts, scales: { y: { beginAtZero: true } } },
+  });
+
+  // 4. Average wait time per service — horizontal bar
+  mkChart('chart-service-wait', {
+    type: 'bar',
+    data: {
+      labels: services.map((s) => s.name),
+      datasets: [{
+        label: 'Avg wait (min)',
+        data: services.map((s) => (s.averageWaitMinutes != null ? Number(s.averageWaitMinutes.toFixed(1)) : 0)),
+        backgroundColor: '#f59e0b',
+        borderRadius: 4,
+      }],
+    },
+    options: { ...baseOpts, indexAxis: 'y', scales: { x: { beginAtZero: true } } },
+  });
+
+  // 5. Wait time distribution — histogram
+  const allWaits = (report.users || [])
+    .flatMap((u) => u.visits.map((v) => v.waitMinutes))
+    .filter((w) => w !== null && w >= 0);
+  const buckets = [
+    { label: '0-5 min', min: 0, max: 5 },
+    { label: '5-10 min', min: 5, max: 10 },
+    { label: '10-15 min', min: 10, max: 15 },
+    { label: '15-20 min', min: 15, max: 20 },
+    { label: '20-30 min', min: 20, max: 30 },
+    { label: '30-60 min', min: 30, max: 60 },
+    { label: '60+ min', min: 60, max: Infinity },
+  ];
+  mkChart('chart-wait-histogram', {
+    type: 'bar',
+    data: {
+      labels: buckets.map((b) => b.label),
+      datasets: [{
+        label: 'Visits',
+        data: buckets.map((b) => allWaits.filter((w) => w >= b.min && w < b.max).length),
+        backgroundColor: '#22c55e',
+        borderRadius: 4,
+      }],
+    },
+    options: { ...baseOpts, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
+  });
+
+  // 6. Per-service queue timeline — line chart per service card
+  for (const service of services) {
+    const svcTimeline = service.queueLengthTimeline || [];
+    mkChart(`chart-svc-${service.id}`, {
+      type: 'line',
+      data: {
+        labels: svcTimeline.map((p) => p.label),
+        datasets: [{
+          label: 'Queue length',
+          data: svcTimeline.map((p) => p.queueLength),
+          fill: true,
+          borderColor: '#3b82f6',
+          backgroundColor: 'rgba(59,130,246,0.1)',
+          tension: 0.35,
+          pointRadius: 2,
+        }],
+      },
+      options: { ...baseOpts, scales: { y: { beginAtZero: true } } },
+    });
+  }
 }
 
 async function loadCommonData() {
@@ -865,8 +1663,46 @@ async function loadCommonData() {
 }
 
 async function loadAdminStats() {
-  const data = await api('/admin/stats');
+  const query = buildAdminStatsQuery();
+  const data = await api(`/admin/reports?${query}`);
   state.adminStats = data;
+}
+
+function bindAdminStats() {
+  const applyBtn = qs('#applyStatsFiltersBtn');
+  const resetBtn = qs('#resetStatsFiltersBtn');
+
+  if (applyBtn) {
+    applyBtn.onclick = async () => {
+      state.adminStatsFilters = {
+        period: qs('#statsPeriodSel')?.value || 'monthly',
+        serviceId: qs('#statsServiceSel')?.value || '',
+        userId: qs('#statsUserIdInput')?.value.trim() || '',
+      };
+      await render();
+    };
+  }
+
+  if (resetBtn) {
+    resetBtn.onclick = async () => {
+      state.adminStatsFilters = {
+        period: 'monthly',
+        serviceId: '',
+        userId: '',
+      };
+      await render();
+    };
+  }
+
+  const csvBtn = qs('#exportStatsCsvBtn');
+  if (csvBtn) {
+    csvBtn.onclick = () => exportStatsCSV();
+  }
+
+  const printBtn = qs('#printStatsBtn');
+  if (printBtn) {
+    printBtn.onclick = () => printStatsReport();
+  }
 }
 
 async function loadAdminQueue(serviceId) {
@@ -1782,6 +2618,7 @@ async function render() {
     else if (hash === '#/admin/stats') {
       await loadAdminStats();
       app.innerHTML = statsPage();
+      initStatsCharts();
     }
     else {
       location.hash = state.user.role === 'admin' ? '#/admin/dashboard' : '#/app/dashboard';
@@ -1795,6 +2632,7 @@ async function render() {
     if (hash === '#/admin/services') bindServiceManagement();
     if (hash === '#/admin/queues') bindQueueManagement();
     if (hash === '#/admin/book-requests') bindAdminBookRequests();
+    if (hash === '#/admin/stats') bindAdminStats();
   } catch (error) {
     app.innerHTML = authCardHtml('QueueSmart', 'Something went wrong while loading the app.', `<div class="err" style="display:block;">${esc(error.message)}</div><p class="helper">Check that the backend is running and your MySQL credentials are correct.</p>`);
   }

@@ -46,17 +46,68 @@ async function addHistory(userId, serviceId, action, connection = pool) {
   );
 }
 
+async function notifyPositionChanges(serviceId, previousEntriesById, connection = pool) {
+  const [services] = await connection.execute(
+    'SELECT name FROM services WHERE id = ? LIMIT 1',
+    [serviceId]
+  );
+
+  const serviceName = services[0]?.name || 'this service';
+
+  const [entries] = await connection.execute(
+    `SELECT id, user_id AS userId, position
+     FROM queue_entries
+     WHERE service_id = ? AND status IN ('waiting', 'almost_ready', 'serving')`,
+    [serviceId]
+  );
+
+  for (const entry of entries) {
+    const previousEntry = previousEntriesById.get(entry.id);
+    if (!previousEntry) continue;
+
+    const previousPosition = Number(previousEntry.position);
+    const currentPosition = Number(entry.position);
+
+    if (Number.isNaN(previousPosition) || Number.isNaN(currentPosition) || previousPosition === currentPosition) {
+      continue;
+    }
+
+    if (currentPosition === 1) {
+      await createNotification(
+        entry.userId,
+        `You are next up in ${serviceName}! Please be ready.`,
+        'in_app',
+        connection
+      );
+    } else {
+      await createNotification(
+        entry.userId,
+        `Your position in ${serviceName} changed from ${previousPosition} to ${currentPosition}.`,
+        'in_app',
+        connection
+      );
+    }
+  }
+}
+
 async function resequenceQueue(serviceId, connection) {
   const [entries] = await connection.execute(
-    `SELECT id FROM queue_entries
+    `SELECT id, user_id AS userId, position
+     FROM queue_entries
      WHERE service_id = ? AND status IN ('waiting', 'almost_ready', 'serving')
      ORDER BY position ASC, joined_at ASC`,
     [serviceId]
   );
 
+  const previousEntriesById = new Map(
+    entries.map((entry) => [entry.id, { userId: entry.userId, position: entry.position }])
+  );
+
   for (let i = 0; i < entries.length; i += 1) {
     await connection.execute('UPDATE queue_entries SET position = ? WHERE id = ?', [i + 1, entries[i].id]);
   }
+
+  await notifyPositionChanges(serviceId, previousEntriesById, connection);
 }
 
 async function getServiceSummary(connection = pool) {
@@ -80,6 +131,188 @@ async function getServiceSummary(connection = pool) {
     ...row,
     isOpen: Boolean(row.isOpen),
   }));
+}
+
+function averageMinutes(values) {
+  if (!values.length) return null;
+
+  const total = values.reduce((sum, value) => sum + Number(value || 0), 0);
+  return Number((total / values.length).toFixed(1));
+}
+
+function roundMetric(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return null;
+  }
+
+  return Number(Number(value).toFixed(1));
+}
+
+function getReportRangeStart(period) {
+  const start = new Date();
+  start.setMinutes(0, 0, 0);
+
+  if (period === 'daily') {
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
+
+  if (period === 'weekly') {
+    start.setDate(start.getDate() - 6);
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
+
+  start.setDate(start.getDate() - 29);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function minutesBetween(startValue, endValue) {
+  if (!startValue || !endValue) return null;
+
+  const start = new Date(startValue);
+  const end = new Date(endValue);
+  const diffMinutes = (end.getTime() - start.getTime()) / 60000;
+
+  if (!Number.isFinite(diffMinutes) || diffMinutes < 0) return null;
+  return roundMetric(diffMinutes);
+}
+
+function formatBucketKey(dateValue, period) {
+  const date = new Date(dateValue);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  if (period === 'daily') {
+    const hour = String(date.getHours()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hour}:00`;
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function advanceBucket(cursor, period) {
+  const next = new Date(cursor);
+
+  if (period === 'daily') {
+    next.setHours(next.getHours() + 1);
+    return next;
+  }
+
+  next.setDate(next.getDate() + 1);
+  return next;
+}
+
+function determineVisitStatus(queueStatus, terminalAction) {
+  if (terminalAction === 'served' || queueStatus === 'completed') return 'served';
+  if (terminalAction === 'left queue') return 'canceled';
+  if (terminalAction === 'removed by admin') return 'no-show';
+  if (queueStatus === 'cancelled') return 'canceled';
+  return 'active';
+}
+
+function buildQueueTimeline(visits, period, rangeStart, generatedAt) {
+  const buckets = new Map();
+  const start = new Date(rangeStart);
+  const end = new Date(generatedAt);
+
+  for (let cursor = new Date(start); cursor <= end; cursor = advanceBucket(cursor, period)) {
+    buckets.set(formatBucketKey(cursor, period), { joins: 0, exits: 0 });
+  }
+
+  for (const visit of visits) {
+    const joinKey = formatBucketKey(visit.joinedAt, period);
+    const joinBucket = buckets.get(joinKey) || { joins: 0, exits: 0 };
+    joinBucket.joins += 1;
+    buckets.set(joinKey, joinBucket);
+
+    if (visit.terminalTime) {
+      const exitKey = formatBucketKey(visit.terminalTime, period);
+      const exitBucket = buckets.get(exitKey) || { joins: 0, exits: 0 };
+      exitBucket.exits += 1;
+      buckets.set(exitKey, exitBucket);
+    }
+  }
+
+  let runningQueueLength = 0;
+  let maxQueueLength = 0;
+  const timeline = Array.from(buckets.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([label, bucket]) => {
+      runningQueueLength += bucket.joins - bucket.exits;
+      if (runningQueueLength > maxQueueLength) {
+        maxQueueLength = runningQueueLength;
+      }
+
+      return {
+        label,
+        joins: bucket.joins,
+        exits: bucket.exits,
+        queueLength: runningQueueLength,
+      };
+    });
+
+  return { timeline, maxQueueLength };
+}
+
+function buildBusyHourHeatmap(visits) {
+  const cells = [];
+  const counts = new Map();
+
+  for (const visit of visits) {
+    const joinedAt = new Date(visit.joinedAt);
+    const day = joinedAt.getDay();
+    const hour = joinedAt.getHours();
+    const key = `${day}-${hour}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+
+  for (const [key, total] of counts.entries()) {
+    const [day, hour] = key.split('-').map(Number);
+    cells.push({ day, hour, total });
+  }
+
+  return cells.sort((a, b) => (a.day - b.day) || (a.hour - b.hour));
+}
+
+function buildPeakHours(visits) {
+  const counts = new Map();
+
+  for (const visit of visits) {
+    const hour = new Date(visit.joinedAt).getHours();
+    counts.set(hour, (counts.get(hour) || 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .map(([hour, total]) => ({ hour: Number(hour), total }))
+    .sort((a, b) => (b.total - a.total) || (a.hour - b.hour))
+    .slice(0, 3);
+}
+
+function buildHandlingTimeSummary(visits) {
+  const servedVisits = visits
+    .filter((visit) => visit.status === 'served' && visit.terminalTime)
+    .sort((a, b) => new Date(a.terminalTime) - new Date(b.terminalTime));
+
+  const intervals = [];
+  for (let index = 1; index < servedVisits.length; index += 1) {
+    const interval = minutesBetween(servedVisits[index - 1].terminalTime, servedVisits[index].terminalTime);
+    if (interval !== null) {
+      intervals.push(interval);
+    }
+  }
+
+  if (!intervals.length) {
+    return { min: null, max: null, average: null };
+  }
+
+  return {
+    min: Math.min(...intervals),
+    max: Math.max(...intervals),
+    average: averageMinutes(intervals),
+  };
 }
 
 app.get('/api/health', async (req, res) => {
@@ -261,10 +494,16 @@ app.post('/api/queues/join', async (req, res) => {
 
     const userId = Number(req.body.userId);
     const serviceId = Number(req.body.serviceId);
+    const requestedLocationId = req.body.locationId ? Number(req.body.locationId) : null;
 
     if (!userId || !serviceId) {
       await connection.rollback();
       return sendError(res, 400, 'User id and service id are required.');
+    }
+
+    if (req.body.locationId && !requestedLocationId) {
+      await connection.rollback();
+      return sendError(res, 400, 'Valid location id is required when provided.');
     }
 
     const [existing] = await connection.execute(
@@ -280,7 +519,7 @@ app.post('/api/queues/join', async (req, res) => {
     }
 
     const [services] = await connection.execute(
-      'SELECT id, name, is_open AS isOpen FROM services WHERE id = ? LIMIT 1',
+      'SELECT id, name, is_open AS isOpen, location_id AS locationId FROM services WHERE id = ? LIMIT 1',
       [serviceId]
     );
 
@@ -295,6 +534,9 @@ app.post('/api/queues/join', async (req, res) => {
       return sendError(res, 400, 'This service is currently closed.');
     }
 
+    // Prefer explicit locationId from the client, then fall back to the service location.
+    const locationId = requestedLocationId || service.locationId || null;
+
     const [queueRows] = await connection.execute(
       `SELECT COUNT(*) AS count
        FROM queue_entries
@@ -304,10 +546,20 @@ app.post('/api/queues/join', async (req, res) => {
 
     const position = Number(queueRows[0].count) + 1;
 
-    const [result] = await connection.execute(
-      'INSERT INTO queue_entries (user_id, service_id, position, status) VALUES (?, ?, ?, ?)',
-      [userId, serviceId, position, 'waiting']
-    );
+    const [locationColumn] = await connection.execute("SHOW COLUMNS FROM queue_entries LIKE 'location_id'");
+
+    let result;
+    if (locationColumn.length) {
+      [result] = await connection.execute(
+        'INSERT INTO queue_entries (user_id, service_id, location_id, position, status) VALUES (?, ?, ?, ?, ?)',
+        [userId, serviceId, locationId, position, 'waiting']
+      );
+    } else {
+      [result] = await connection.execute(
+        'INSERT INTO queue_entries (user_id, service_id, position, status) VALUES (?, ?, ?, ?)',
+        [userId, serviceId, position, 'waiting']
+      );
+    }
 
     await addHistory(userId, serviceId, 'joined queue', connection);
     await createNotification(userId, `You joined ${service.name}. Your current position is ${position}.`, 'in_app', connection);
@@ -321,6 +573,7 @@ app.post('/api/queues/join', async (req, res) => {
         id: result.insertId,
         userId,
         serviceId,
+        locationId,
         position,
         status: 'waiting',
 
@@ -448,12 +701,25 @@ app.post('/api/admin/queue/reorder', async (req, res) => {
       return sendError(res, 400, 'Service id and ordered entry ids are required.');
     }
 
+    const [beforeEntries] = await connection.execute(
+      `SELECT id, user_id AS userId, position
+       FROM queue_entries
+       WHERE service_id = ? AND status IN ('waiting', 'almost_ready', 'serving')`,
+      [serviceId]
+    );
+
+    const previousEntriesById = new Map(
+      beforeEntries.map((entry) => [entry.id, { userId: entry.userId, position: entry.position }])
+    );
+
     for (let i = 0; i < orderedEntryIds.length; i += 1) {
       await connection.execute(
         'UPDATE queue_entries SET position = ? WHERE id = ? AND service_id = ?',
         [i + 1, orderedEntryIds[i], serviceId]
       );
     }
+
+    await notifyPositionChanges(serviceId, previousEntriesById, connection);
 
     await connection.commit();
     res.json({ ok: true, message: 'Queue reordered.' });
@@ -618,18 +884,307 @@ app.get('/api/admin/stats', async (req, res) => {
 
     const [serviceStats] = await pool.execute(
       `SELECT s.name,
-              COUNT(CASE WHEN qe.status IN ('waiting', 'almost_ready', 'serving') THEN 1 END) AS activeQueueLength,
-              COUNT(CASE WHEN h.action = 'served' THEN 1 END) AS totalServed,
+              (
+                SELECT COUNT(*)
+                FROM queue_entries qe
+                WHERE qe.service_id = s.id
+                  AND qe.status IN ('waiting', 'almost_ready', 'serving')
+              ) AS activeQueueLength,
+              (
+                SELECT COUNT(*)
+                FROM history h
+                WHERE h.service_id = s.id
+                  AND h.action = 'served'
+              ) AS totalServed
        FROM services s
-       LEFT JOIN queue_entries qe ON qe.service_id = s.id
-       LEFT JOIN history h ON h.service_id = s.id
-       GROUP BY s.id
        ORDER BY s.id ASC`
     );
 
     res.json({ ok: true, totals: totals[0], serviceStats });
   } catch (error) {
     res.status(500).json({ ok: false, message: 'Could not load statistics.', error: error.message });
+  }
+});
+
+app.get('/api/admin/reports', async (req, res) => {
+  try {
+    const period = ['daily', 'weekly', 'monthly'].includes(req.query.period)
+      ? req.query.period
+      : 'monthly';
+    const serviceId = req.query.serviceId ? Number(req.query.serviceId) : null;
+    const userId = req.query.userId ? Number(req.query.userId) : null;
+    const rangeStart = getReportRangeStart(period);
+    const generatedAt = new Date();
+
+    if (req.query.serviceId && !serviceId) {
+      return sendError(res, 400, 'Valid service id is required when provided.');
+    }
+
+    if (req.query.userId && !userId) {
+      return sendError(res, 400, 'Valid user id is required when provided.');
+    }
+
+    const visitWhere = ['qe.joined_at >= ?'];
+    const visitParams = [rangeStart];
+    if (serviceId) {
+      visitWhere.push('qe.service_id = ?');
+      visitParams.push(serviceId);
+    }
+    if (userId) {
+      visitWhere.push('qe.user_id = ?');
+      visitParams.push(userId);
+    }
+
+    const historyWhere = [`h.action IN ('served', 'left queue', 'removed by admin')`, 'h.action_time >= ?'];
+    const historyParams = [rangeStart];
+    if (serviceId) {
+      historyWhere.push('h.service_id = ?');
+      historyParams.push(serviceId);
+    }
+    if (userId) {
+      historyWhere.push('h.user_id = ?');
+      historyParams.push(userId);
+    }
+
+    const servicesWhere = [];
+    const servicesParams = [];
+    if (serviceId) {
+      servicesWhere.push('s.id = ?');
+      servicesParams.push(serviceId);
+    }
+
+    const [visitRows, historyRows, serviceRows] = await Promise.all([
+      pool.execute(
+        `SELECT qe.id AS queueEntryId,
+                qe.user_id AS userId,
+                qe.service_id AS serviceId,
+                qe.status AS queueStatus,
+                qe.joined_at AS joinedAt,
+                u.full_name AS fullName,
+                u.email,
+                u.role,
+                s.name AS serviceName,
+                s.description AS serviceDescription,
+                s.is_open AS isOpen,
+                l.name AS locationName
+         FROM queue_entries qe
+         INNER JOIN users u ON u.id = qe.user_id
+         INNER JOIN services s ON s.id = qe.service_id
+         LEFT JOIN locations l ON l.id = s.location_id
+         WHERE ${visitWhere.join(' AND ')}
+         ORDER BY qe.user_id ASC, qe.service_id ASC, qe.joined_at ASC`,
+        visitParams
+      ),
+      pool.execute(
+        `SELECT h.user_id AS userId,
+                h.service_id AS serviceId,
+                h.action,
+                h.action_time AS actionTime
+         FROM history h
+         WHERE ${historyWhere.join(' AND ')}
+         ORDER BY h.user_id ASC, h.service_id ASC, h.action_time ASC`,
+        historyParams
+      ),
+      pool.execute(
+        `SELECT s.id,
+                s.name,
+                s.description,
+                s.is_open AS isOpen,
+                l.name AS locationName
+         FROM services s
+         LEFT JOIN locations l ON l.id = s.location_id
+         ${servicesWhere.length ? `WHERE ${servicesWhere.join(' AND ')}` : ''}
+         ORDER BY s.name ASC`,
+        servicesParams
+      ),
+    ]);
+
+    const historiesByKey = new Map();
+    for (const row of historyRows[0]) {
+      const key = `${row.userId}:${row.serviceId}`;
+      const rows = historiesByKey.get(key) || [];
+      rows.push(row);
+      historiesByKey.set(key, rows);
+    }
+
+    const visitGroups = new Map();
+    for (const row of visitRows[0]) {
+      const key = `${row.userId}:${row.serviceId}`;
+      const rows = visitGroups.get(key) || [];
+      rows.push(row);
+      visitGroups.set(key, rows);
+    }
+
+    const visits = [];
+    for (const [key, groupedVisits] of visitGroups.entries()) {
+      const groupedHistory = historiesByKey.get(key) || [];
+
+      for (let index = 0; index < groupedVisits.length; index += 1) {
+        const visit = groupedVisits[index];
+        const nextVisit = groupedVisits[index + 1] || null;
+        const joinedAtTime = new Date(visit.joinedAt).getTime();
+        const nextJoinedAtTime = nextVisit ? new Date(nextVisit.joinedAt).getTime() : Number.POSITIVE_INFINITY;
+        const terminalEvent = groupedHistory.find((item) => {
+          const actionTime = new Date(item.actionTime).getTime();
+          return actionTime >= joinedAtTime && actionTime < nextJoinedAtTime;
+        }) || null;
+
+        const status = determineVisitStatus(visit.queueStatus, terminalEvent?.action || null);
+        const terminalTime = terminalEvent?.actionTime || null;
+        const waitMinutes = minutesBetween(visit.joinedAt, terminalTime);
+
+        visits.push({
+          queueEntryId: Number(visit.queueEntryId),
+          userId: Number(visit.userId),
+          fullName: visit.fullName,
+          email: visit.email,
+          role: visit.role,
+          serviceId: Number(visit.serviceId),
+          serviceName: visit.serviceName,
+          serviceDescription: visit.serviceDescription,
+          locationName: visit.locationName || null,
+          isOpen: Boolean(visit.isOpen),
+          joinedAt: visit.joinedAt,
+          queueStatus: visit.queueStatus,
+          status,
+          terminalAction: terminalEvent?.action || null,
+          terminalTime,
+          waitMinutes,
+        });
+      }
+    }
+
+    const usersById = new Map();
+    for (const visit of visits) {
+      if (!usersById.has(visit.userId)) {
+        usersById.set(visit.userId, {
+          userId: visit.userId,
+          fullName: visit.fullName,
+          email: visit.email,
+          contactInfo: visit.email,
+          role: visit.role,
+          totalVisits: 0,
+          averageWaitMinutes: null,
+          visits: [],
+        });
+      }
+
+      const user = usersById.get(visit.userId);
+      user.totalVisits += 1;
+      user.visits.push({
+        queueEntryId: visit.queueEntryId,
+        serviceId: visit.serviceId,
+        serviceName: visit.serviceName,
+        joinedAt: visit.joinedAt,
+        status: visit.status,
+        waitMinutes: visit.waitMinutes,
+        terminalTime: visit.terminalTime,
+      });
+    }
+
+    for (const user of usersById.values()) {
+      user.averageWaitMinutes = averageMinutes(
+        user.visits
+          .map((visit) => visit.waitMinutes)
+          .filter((value) => value !== null)
+      );
+      user.visits.sort((a, b) => new Date(b.joinedAt) - new Date(a.joinedAt));
+    }
+
+    const servicesById = new Map(
+      serviceRows[0].map((row) => [Number(row.id), {
+        id: Number(row.id),
+        name: row.name,
+        description: row.description,
+        isOpen: Boolean(row.isOpen),
+        locationName: row.locationName || null,
+        visits: [],
+      }])
+    );
+
+    for (const visit of visits) {
+      const service = servicesById.get(visit.serviceId);
+      if (service) {
+        service.visits.push(visit);
+      }
+    }
+
+    const serviceReports = Array.from(servicesById.values()).map((service) => {
+      const queueTimeline = buildQueueTimeline(service.visits, period, rangeStart, generatedAt);
+      const handlingTime = buildHandlingTimeSummary(service.visits);
+      const servedVisits = service.visits.filter((visit) => visit.status === 'served');
+      const dropOffs = service.visits.filter((visit) => ['canceled', 'no-show'].includes(visit.status)).length;
+
+      return {
+        id: service.id,
+        name: service.name,
+        description: service.description,
+        isOpen: service.isOpen,
+        locationName: service.locationName,
+        totalVisits: service.visits.length,
+        totalUsersServed: servedVisits.length,
+        peakHours: buildPeakHours(service.visits),
+        queueLengthTimeline: queueTimeline.timeline,
+        busyHourHeatmap: buildBusyHourHeatmap(service.visits),
+        handlingTime,
+        averageWaitMinutes: averageMinutes(
+          servedVisits.map((visit) => visit.waitMinutes).filter((value) => value !== null)
+        ),
+        maximumQueueLength: queueTimeline.maxQueueLength,
+        dropOffs,
+      };
+    });
+
+    const overallTimeline = buildQueueTimeline(visits, period, rangeStart, generatedAt);
+    const servedVisits = visits.filter((visit) => visit.status === 'served');
+    const dropOffs = visits.filter((visit) => ['canceled', 'no-show'].includes(visit.status)).length;
+    const statusCounts = visits.reduce((accumulator, visit) => {
+      accumulator[visit.status] = (accumulator[visit.status] || 0) + 1;
+      return accumulator;
+    }, {});
+    const handlingTimeValues = serviceReports
+      .map((service) => service.handlingTime.average)
+      .filter((value) => value !== null);
+
+    res.json({
+      ok: true,
+      filters: {
+        period,
+        serviceId,
+        userId,
+        generatedAt,
+      },
+      overview: {
+        totalUsersServed: servedVisits.length,
+        averageWaitTime: averageMinutes(
+          servedVisits.map((visit) => visit.waitMinutes).filter((value) => value !== null)
+        ),
+        averageServiceTime: averageMinutes(handlingTimeValues),
+        maximumQueueLength: overallTimeline.maxQueueLength,
+        dropOffRate: visits.length ? roundMetric((dropOffs / visits.length) * 100) : 0,
+        queueEfficiencyRate: visits.length ? roundMetric((servedVisits.length / visits.length) * 100) : 0,
+        totalVisits: visits.length,
+        totalUsers: usersById.size,
+      },
+      users: Array.from(usersById.values()).sort((a, b) => a.fullName.localeCompare(b.fullName)),
+      services: serviceReports,
+      queueUsage: {
+        totalUsersServed: servedVisits.length,
+        averageWaitTime: averageMinutes(
+          servedVisits.map((visit) => visit.waitMinutes).filter((value) => value !== null)
+        ),
+        averageServiceTime: averageMinutes(handlingTimeValues),
+        maximumQueueLength: overallTimeline.maxQueueLength,
+        dropOffRate: visits.length ? roundMetric((dropOffs / visits.length) * 100) : 0,
+        queueEfficiencyRate: visits.length ? roundMetric((servedVisits.length / visits.length) * 100) : 0,
+        statusBreakdown: Object.entries(statusCounts)
+          .map(([status, total]) => ({ status, total }))
+          .sort((a, b) => a.status.localeCompare(b.status)),
+        queueLengthTimeline: overallTimeline.timeline,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: 'Could not load reporting data.', error: error.message });
   }
 });
 
