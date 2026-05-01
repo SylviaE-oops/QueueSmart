@@ -2,9 +2,9 @@
 
 A full-stack queue management system built with **Node.js / Express / MySQL** on the backend and a **Vanilla JS** single-page app on the frontend.
 
-QueueSmart is a queue management system designed to streamline how users at the University of Houston specifically for students interact with campus services and help admins efficiently manage queues.
+QueueSmart is a queue management system designed to streamline how users at the University of Houston specifically for students interact with campus services and help admins efficiently pick up their desired textbook needed for class at three main loctions with the location they intend to pickup.
 
-
+This web app helps improve 
 
 ---
 
