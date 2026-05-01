@@ -2,6 +2,8 @@
 
 A full-stack queue management system built with **Node.js / Express / MySQL** on the backend and a **Vanilla JS** single-page app on the frontend.
 
+QueueSmart is a queue management system designed to streamline how users interact with campus services and help admins efficiently manage queues.
+
 ---
 
 ## Features
@@ -28,7 +30,7 @@ A full-stack queue management system built with **Node.js / Express / MySQL** on
 | Usage statistics | Live KPI cards (users served, active queues, notification counts) |
 | **Stats Reporting** | Rich analytics dashboard with filters, charts, CSV export, and PDF report |
 
-### Stats & Reporting (§9 / §10)
+### Stats & Reporting
 - **Filters**: period (daily / weekly / monthly), specific service, individual user
 - **KPI cards**: total served, average wait, average service time, max queue length, drop-off rate, queue efficiency
 - **Charts** (Chart.js 4):
