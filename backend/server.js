@@ -1366,6 +1366,12 @@ app.patch('/api/admin/book-requests/:id/status', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`QueueSmart backend running on http://localhost:${PORT}`);
-});
+// Export app for testing
+module.exports = { app, pool };
+
+// Start server only if run directly
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`QueueSmart backend running on http://localhost:${PORT}`);
+  });
+}

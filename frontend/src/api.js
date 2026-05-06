@@ -47,14 +47,14 @@ export async function apiCall(endpoint, options = {}) {
 export async function loginUser(email, password) {
   const result = await apiCall('/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ username: email, password })
+    body: JSON.stringify({ email, password })
   });
 
   return {
     success: true,
     data: {
       id: result.user.id,
-      email: result.user.username,
+      email: result.user.email,
       role: result.user.role,
       token: result.token
     }
@@ -64,15 +64,15 @@ export async function loginUser(email, password) {
 export async function registerUser(email, password) {
   const result = await apiCall('/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ username: email, password, role: 'user' })
+    body: JSON.stringify({ fullName: email.split('@')[0], email, password, role: 'user' })
   });
 
   return {
     success: true,
     data: {
-      id: result.id,
-      email: result.username,
-      role: result.role
+      id: result.user.id,
+      email: result.user.email,
+      role: result.user.role
     }
   };
 }
