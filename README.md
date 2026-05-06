@@ -4,7 +4,7 @@ A full-stack queue management system built with **Node.js / Express / MySQL** on
 
 QueueSmart is a queue management system designed to streamline how users at the University of Houston specifically for students interact with campus services and help admins efficiently pick up their desired textbook needed for class at three main loctions with the location they intend to pickup.
 
-This web app helps improve 
+This web app is an improvement from the current textbook pickup system upheld by the University of Houston 
 
 ---
 
